@@ -41,9 +41,13 @@ export async function getComplaints(filters = {}) {
 }
 
 export async function assignComplaint(id, employeeId) {
+  const targetId = employeeId && String(employeeId).trim() !== '' ? employeeId : null;
   const { data, error } = await supabase
     .from('maintenance_requests')
-    .update({ assigned_to: employeeId, status: 'in_progress' })
+    .update({
+      assigned_to: targetId,
+      status: targetId ? 'in_progress' : 'open',
+    })
     .eq('id', id)
     .select()
     .single();

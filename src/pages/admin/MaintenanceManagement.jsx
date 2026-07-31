@@ -70,7 +70,7 @@ export default function MaintenanceManagement() {
   const confirmAction = async () => {
     const { type, request, newValue } = actionModal;
     
-    if (!newValue) {
+    if (newValue === undefined || newValue === null) {
       toast.error('Please select a value to update.');
       return;
     }
@@ -78,6 +78,10 @@ export default function MaintenanceManagement() {
     try {
       let error;
       if (type === 'status') {
+        if (!newValue) {
+          toast.error('Please select a valid status.');
+          return;
+        }
         const res = await updateStatus(request.id, newValue);
         error = res.error;
       } else if (type === 'assign') {

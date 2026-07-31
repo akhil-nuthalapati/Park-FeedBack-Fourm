@@ -1,8 +1,28 @@
-CREATE TYPE IF NOT EXISTS user_role AS ENUM ('SUPER_ADMIN', 'ADMIN', 'OFFICER', 'VIEWER');
-CREATE TYPE IF NOT EXISTS park_status AS ENUM ('active', 'inactive', 'maintenance');
-CREATE TYPE IF NOT EXISTS request_status AS ENUM ('open', 'in_progress', 'resolved', 'rejected');
-CREATE TYPE IF NOT EXISTS request_priority AS ENUM ('low', 'medium', 'high', 'critical');
-CREATE TYPE IF NOT EXISTS issue_type AS ENUM ('equipment', 'lighting', 'hygiene', 'safety', 'greenery', 'other');
+DO $$ BEGIN
+  CREATE TYPE user_role AS ENUM ('SUPER_ADMIN', 'ADMIN', 'OFFICER', 'VIEWER');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$ BEGIN
+  CREATE TYPE park_status AS ENUM ('active', 'inactive', 'maintenance');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$ BEGIN
+  CREATE TYPE request_status AS ENUM ('open', 'in_progress', 'resolved', 'rejected');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$ BEGIN
+  CREATE TYPE request_priority AS ENUM ('low', 'medium', 'high', 'critical');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$ BEGIN
+  CREATE TYPE issue_type AS ENUM ('equipment', 'lighting', 'hygiene', 'safety', 'greenery', 'other');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
 
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";

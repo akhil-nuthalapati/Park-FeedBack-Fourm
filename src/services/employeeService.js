@@ -8,11 +8,12 @@ export async function getEmployees() {
 export async function createEmployee(payload) {
   const { email, password, full_name, phone, designation, department, role } = payload;
 
-  const { data: authData, error: authError } = await supabase.auth.admin.createUser({
+  const { data: authData, error: authError } = await supabase.auth.signUp({
     email,
     password,
-    email_confirm: true,
-    user_metadata: { full_name, role },
+    options: {
+      data: { full_name, role },
+    },
   });
 
   if (authError) return { data: null, error: authError };
@@ -23,8 +24,8 @@ export async function createEmployee(payload) {
       .update({ phone, designation, department, role })
       .eq('auth_user_id', authData.user.id)
       .select()
-      .single();
-    return { data, error };
+      .maybeSingle();
+    return { data: data || authData.user, error };
   }
 
   return { data: authData, error: null };

@@ -18,10 +18,10 @@ STABLE
 SECURITY DEFINER
 SET search_path = public
 AS $$
-  SELECT role
-  FROM profiles
-  WHERE auth_user_id = auth.uid()
-  LIMIT 1;
+  SELECT COALESCE(
+    (SELECT role FROM profiles WHERE auth_user_id = auth.uid() LIMIT 1),
+    'VIEWER'::user_role
+  );
 $$;
 
 -- ---------------------------------------------------------------------------
@@ -203,13 +203,14 @@ CREATE POLICY "super_admin_insert_profiles"
   TO authenticated
   WITH CHECK (current_user_role() = 'SUPER_ADMIN');
 
--- Only SUPER_ADMIN can update profiles
+-- Users can update their own profile OR SUPER_ADMIN can update any profile
 DROP POLICY IF EXISTS "super_admin_update_profiles" ON profiles;
-CREATE POLICY "super_admin_update_profiles"
+DROP POLICY IF EXISTS "auth_update_own_or_admin_profiles" ON profiles;
+CREATE POLICY "auth_update_own_or_admin_profiles"
   ON profiles FOR UPDATE
   TO authenticated
-  USING (current_user_role() = 'SUPER_ADMIN')
-  WITH CHECK (current_user_role() = 'SUPER_ADMIN');
+  USING (auth_user_id = auth.uid() OR current_user_role() = 'SUPER_ADMIN')
+  WITH CHECK (auth_user_id = auth.uid() OR current_user_role() = 'SUPER_ADMIN');
 
 -- Only SUPER_ADMIN can delete profiles
 DROP POLICY IF EXISTS "super_admin_delete_profiles" ON profiles;
@@ -236,11 +237,27 @@ CREATE POLICY "anon_upload_maintenance_images"
   TO anon
   WITH CHECK (bucket_id = 'maintenance-images');
 
+-- Anonymous users can update uploaded images (upsert support)
+DROP POLICY IF EXISTS "anon_update_maintenance_images" ON storage.objects;
+CREATE POLICY "anon_update_maintenance_images"
+  ON storage.objects FOR UPDATE
+  TO anon
+  USING (bucket_id = 'maintenance-images')
+  WITH CHECK (bucket_id = 'maintenance-images');
+
 -- Authenticated users can upload images
 DROP POLICY IF EXISTS "auth_upload_maintenance_images" ON storage.objects;
 CREATE POLICY "auth_upload_maintenance_images"
   ON storage.objects FOR INSERT
   TO authenticated
+  WITH CHECK (bucket_id = 'maintenance-images');
+
+-- Authenticated users can update uploaded images (upsert support)
+DROP POLICY IF EXISTS "auth_update_maintenance_images" ON storage.objects;
+CREATE POLICY "auth_update_maintenance_images"
+  ON storage.objects FOR UPDATE
+  TO authenticated
+  USING (bucket_id = 'maintenance-images')
   WITH CHECK (bucket_id = 'maintenance-images');
 
 -- Anyone can read maintenance images (public bucket)
@@ -259,3 +276,4 @@ CREATE POLICY "admin_delete_maintenance_images"
     bucket_id = 'maintenance-images'
     AND current_user_role() IN ('ADMIN', 'SUPER_ADMIN')
   );
+

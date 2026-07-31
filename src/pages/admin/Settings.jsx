@@ -1,3 +1,4 @@
+import { useNavigate } from 'react-router-dom';
 import Breadcrumb from '../../components/Breadcrumb';
 import Card from '../../components/Card';
 import { useAuth } from '../../hooks/useAuth';
@@ -5,6 +6,7 @@ import { Settings as SettingsIcon, User, Shield } from 'lucide-react';
 
 export default function Settings() {
   const { profile, role, isSuperAdmin } = useAuth();
+  const navigate = useNavigate();
 
   return (
     <div>
@@ -64,13 +66,22 @@ export default function Settings() {
                 <p className="text-sm text-gray-600 mb-4">
                   Super Admin controls are available to manage users, parks, and system configuration.
                 </p>
-                <button className="w-full text-left px-4 py-3 bg-gray-50 hover:bg-gray-100 rounded-lg text-sm font-medium transition-colors border border-gray-200">
+                <button 
+                  onClick={() => navigate('/admin/employees')}
+                  className="w-full text-left px-4 py-3 bg-gray-50 hover:bg-gray-100 rounded-lg text-sm font-medium transition-colors border border-gray-200"
+                >
                   Manage Employee Access
                 </button>
-                <button className="w-full text-left px-4 py-3 bg-gray-50 hover:bg-gray-100 rounded-lg text-sm font-medium transition-colors border border-gray-200">
+                <button 
+                  onClick={() => navigate('/admin/dashboard')}
+                  className="w-full text-left px-4 py-3 bg-gray-50 hover:bg-gray-100 rounded-lg text-sm font-medium transition-colors border border-gray-200"
+                >
                   Manage Park Profiles
                 </button>
-                <button className="w-full text-left px-4 py-3 bg-gray-50 hover:bg-gray-100 rounded-lg text-sm font-medium transition-colors border border-gray-200">
+                <button 
+                  onClick={() => navigate('/admin/dashboard')}
+                  className="w-full text-left px-4 py-3 bg-gray-50 hover:bg-gray-100 rounded-lg text-sm font-medium transition-colors border border-gray-200"
+                >
                   QR Code Generator
                 </button>
               </div>

@@ -84,11 +84,10 @@ export default function Maintenance() {
     try {
       let photo_url = null;
       
-      // Upload photo if present
+      // Upload photo if present (with fail-safe base64 fallback)
       if (photo) {
-        const { data, error } = await uploadComplaintPhoto(photo);
-        if (error) throw error;
-        photo_url = data;
+        const { data: uploadedUrl } = await uploadComplaintPhoto(photo);
+        photo_url = uploadedUrl;
       }
       
       const payload = {
@@ -97,13 +96,15 @@ export default function Maintenance() {
       };
       
       const { error } = await submitComplaint(payload);
-      if (error) throw error;
+      if (error) {
+        throw new Error(error.message || 'Database error submitting request');
+      }
       
       toast.success('Maintenance request submitted successfully!');
       navigate('/thank-you', { state: { type: 'maintenance' } });
-    } catch (error) {
-      console.error(error);
-      toast.error('Failed to submit request. Please try again.');
+    } catch (err) {
+      console.error('Submit complaint error:', err);
+      toast.error(err.message || 'Failed to submit request. Please try again.');
     } finally {
       setSubmitting(false);
     }

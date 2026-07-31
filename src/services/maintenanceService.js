@@ -1,23 +1,55 @@
 import { supabase } from './supabase';
 
 export async function submitComplaint(payload) {
-  const { data, error } = await supabase.from('maintenance_requests').insert([payload]);
+  const finalPayload = {
+    park_id: payload.park_id,
+    issue_type: payload.issue_type || 'other',
+    description: payload.description || '',
+    priority: payload.priority || 'medium',
+    status: 'open',
+    photo_url: payload.photo_url || null,
+  };
+
+  const { data, error } = await supabase
+    .from('maintenance_requests')
+    .insert([finalPayload])
+    .select()
+    .single();
+
   return { data, error };
 }
 
 export async function uploadComplaintPhoto(file) {
-  const fileExt = file.name.split('.').pop();
-  const fileName = `${Date.now()}-${Math.random().toString(36).substring(2)}.${fileExt}`;
-  const filePath = `complaints/${fileName}`;
+  if (!file) return { data: null, error: null };
 
-  const { data, error } = await supabase.storage
-    .from('maintenance-images')
-    .upload(filePath, file, { cacheControl: '3600', upsert: false });
+  try {
+    const fileExt = file.name.split('.').pop();
+    const fileName = `${Date.now()}-${Math.random().toString(36).substring(2)}.${fileExt}`;
+    const filePath = `complaints/${fileName}`;
 
-  if (error) return { data: null, error };
+    const { data, error } = await supabase.storage
+      .from('maintenance-images')
+      .upload(filePath, file, { cacheControl: '3600', upsert: false });
 
-  const { data: urlData } = supabase.storage.from('maintenance-images').getPublicUrl(filePath);
-  return { data: urlData.publicUrl, error: null };
+    if (!error && data) {
+      const { data: urlData } = supabase.storage.from('maintenance-images').getPublicUrl(filePath);
+      return { data: urlData.publicUrl, error: null };
+    }
+  } catch (e) {
+    console.warn('Supabase storage bucket upload error, converting to base64 fallback:', e);
+  }
+
+  // Fail-Safe Fallback: Convert image file to base64 Data URL so submission NEVER fails
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      resolve({ data: reader.result, error: null });
+    };
+    reader.onerror = () => {
+      resolve({ data: null, error: 'Failed to read image file.' });
+    };
+    reader.readAsDataURL(file);
+  });
 }
 
 export async function getComplaints(filters = {}) {

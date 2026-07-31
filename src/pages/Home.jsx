@@ -8,6 +8,7 @@ import { getVisitCount } from '../services/visitService';
 import { getAverageRatings } from '../services/feedbackService';
 import { getComplaints } from '../services/maintenanceService';
 import { getAllParks } from '../services/parkService';
+import { getParkOperationalStatus } from '../utils/helpers';
 
 export default function Home() {
   const [stats, setStats] = useState({
@@ -160,33 +161,38 @@ export default function Home() {
 
             {/* Parks Grid */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {filteredParks.map((park) => (
-                <div key={park.id} className="bg-white p-5 rounded-xl border border-gray-200 hover:border-primary transition-all duration-200 hover:shadow-md">
-                  <div className="flex justify-between items-start mb-2">
-                    <h4 className="font-bold text-gray-800 text-base">{park.name}</h4>
-                    <span className="badge bg-emerald-100 text-emerald-800 text-[10px]">
-                      {park.status.toUpperCase()}
-                    </span>
+              {filteredParks.map((park) => {
+                const opStatus = getParkOperationalStatus(park.status);
+                return (
+                  <div key={park.id} className="bg-white p-5 rounded-xl border border-gray-200 hover:border-primary transition-all duration-200 hover:shadow-md flex flex-col justify-between">
+                    <div>
+                      <div className="flex justify-between items-start mb-2 gap-2">
+                        <h4 className="font-bold text-gray-800 text-base">{park.name}</h4>
+                        <span className={`px-2.5 py-0.5 text-[10px] font-bold rounded-full border flex-shrink-0 ${opStatus.badgeClass}`}>
+                          {opStatus.label}
+                        </span>
+                      </div>
+                      <p className="text-xs text-gray-500 mb-3 flex items-center gap-1">
+                        <MapPin size={12} className="text-gray-400" /> {park.location} ({park.ward})
+                      </p>
+                    </div>
+                    <div className="flex gap-2 border-t border-gray-100 pt-3 mt-2">
+                      <button
+                        onClick={() => navigate(`/checkin/${park.qr_code || ''}`)}
+                        className="flex-1 py-1.5 px-3 bg-primary-light text-primary hover:bg-primary hover:text-white rounded text-xs font-semibold transition-colors flex items-center justify-center gap-1"
+                      >
+                        <QrCode size={13} /> Check In
+                      </button>
+                      <button
+                        onClick={() => navigate('/feedback')}
+                        className="py-1.5 px-3 bg-gray-100 text-gray-700 hover:bg-gray-200 rounded text-xs font-semibold transition-colors"
+                      >
+                        Feedback
+                      </button>
+                    </div>
                   </div>
-                  <p className="text-xs text-gray-500 mb-3 flex items-center gap-1">
-                    <MapPin size={12} className="text-gray-400" /> {park.location} ({park.ward})
-                  </p>
-                  <div className="flex gap-2 border-t border-gray-100 pt-3 mt-2">
-                    <button
-                      onClick={() => navigate(`/checkin?qr=${park.qr_code}`)}
-                      className="flex-1 py-1.5 px-3 bg-primary-light text-primary hover:bg-primary hover:text-white rounded text-xs font-semibold transition-colors flex items-center justify-center gap-1"
-                    >
-                      <QrCode size={13} /> Check In
-                    </button>
-                    <button
-                      onClick={() => navigate('/feedback')}
-                      className="py-1.5 px-3 bg-gray-100 text-gray-700 hover:bg-gray-200 rounded text-xs font-semibold transition-colors"
-                    >
-                      Feedback
-                    </button>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
 
               {filteredParks.length === 0 && (
                 <div className="col-span-full text-center py-8 text-gray-400 text-sm">

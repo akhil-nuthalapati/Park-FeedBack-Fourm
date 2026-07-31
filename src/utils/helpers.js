@@ -91,3 +91,49 @@ export function getStatusColor(status) {
   };
   return map[status] || 'bg-gray-100 text-gray-800';
 }
+
+export function getParkOperationalStatus(parkStatus, customDate = new Date()) {
+  if (parkStatus === 'maintenance') {
+    return {
+      status: 'maintenance',
+      label: 'Under Maintenance',
+      badgeClass: 'bg-amber-100 text-amber-800 border-amber-200',
+      timingText: 'Closed for maintenance',
+      isOpen: false,
+    };
+  }
+  if (parkStatus === 'inactive') {
+    return {
+      status: 'inactive',
+      label: 'Inactive (Closed)',
+      badgeClass: 'bg-rose-100 text-rose-800 border-rose-200',
+      timingText: 'Closed to public',
+      isOpen: false,
+    };
+  }
+
+  // Active park: check municipal operating hours (5:00 AM - 9:00 PM)
+  const currentHour = customDate.getHours();
+  const currentMinute = customDate.getMinutes();
+  const timeInMinutes = currentHour * 60 + currentMinute;
+  const openMinutes = 5 * 60; // 5:00 AM
+  const closeMinutes = 21 * 60; // 9:00 PM (21:00)
+
+  if (timeInMinutes >= openMinutes && timeInMinutes < closeMinutes) {
+    return {
+      status: 'open',
+      label: '🟢 Open Now (5:00 AM - 9:00 PM)',
+      badgeClass: 'bg-emerald-100 text-emerald-800 border-emerald-200',
+      timingText: 'Operating Hours: 5:00 AM – 9:00 PM',
+      isOpen: true,
+    };
+  } else {
+    return {
+      status: 'closed_night',
+      label: '🌙 Closed for Night (Opens 5:00 AM)',
+      badgeClass: 'bg-slate-100 text-slate-700 border-slate-200',
+      timingText: 'Closed for Night (Reopens 5:00 AM)',
+      isOpen: false,
+    };
+  }
+}

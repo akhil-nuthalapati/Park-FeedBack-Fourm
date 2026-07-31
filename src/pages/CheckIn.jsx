@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { getParkByQrCode, getAllParks } from '../services/parkService';
 import { logVisit } from '../services/visitService';
-import { getDeviceId, getCurrentDate, formatTime } from '../utils/helpers';
+import { getDeviceId, getCurrentDate, formatTime, getParkOperationalStatus } from '../utils/helpers';
 import Button from '../components/Button';
 import Card from '../components/Card';
 import Loader from '../components/Loader';
@@ -122,8 +122,26 @@ export default function CheckIn() {
 
           {park && (
             <>
-              <h2 className="text-2xl font-bold text-gray-800 mb-2">{park.name}</h2>
-              <p className="text-gray-500 mb-6">{park.location} ({park.ward})</p>
+              <div className="flex items-center justify-center gap-2 mb-2">
+                <h2 className="text-2xl font-bold text-gray-800">{park.name}</h2>
+              </div>
+              <p className="text-gray-500 mb-3">{park.location} ({park.ward})</p>
+
+              {(() => {
+                const opStatus = getParkOperationalStatus(park.status);
+                return (
+                  <div className="mb-6 flex flex-col items-center gap-2">
+                    <span className={`px-3 py-1 text-xs font-bold rounded-full border shadow-2xs ${opStatus.badgeClass}`}>
+                      {opStatus.label}
+                    </span>
+                    {!opStatus.isOpen && (
+                      <p className="text-xs text-amber-700 bg-amber-50 px-3 py-1.5 rounded-lg border border-amber-200">
+                        🌙 <strong>Note:</strong> Standard municipal operating hours are <strong>5:00 AM – 9:00 PM</strong>. Your visit will be logged for tonight's record.
+                      </p>
+                    )}
+                  </div>
+                );
+              })()}
             </>
           )}
 

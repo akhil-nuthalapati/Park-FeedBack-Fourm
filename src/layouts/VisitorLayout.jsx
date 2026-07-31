@@ -9,11 +9,26 @@ export default function VisitorLayout() {
   const [announcement, setAnnouncement] = useState(null);
   const [dismissed, setDismissed] = useState(false);
 
-  useEffect(() => {
-    const data = getBroadcastAnnouncement();
+  const fetchAnnouncement = async () => {
+    const data = await getBroadcastAnnouncement();
     if (data && data.active && data.message) {
       setAnnouncement(data);
+      setDismissed(false);
+    } else {
+      setAnnouncement(null);
     }
+  };
+
+  useEffect(() => {
+    fetchAnnouncement();
+
+    window.addEventListener('announcementUpdated', fetchAnnouncement);
+    window.addEventListener('storage', fetchAnnouncement);
+
+    return () => {
+      window.removeEventListener('announcementUpdated', fetchAnnouncement);
+      window.removeEventListener('storage', fetchAnnouncement);
+    };
   }, []);
 
   const getBannerColor = (type) => {

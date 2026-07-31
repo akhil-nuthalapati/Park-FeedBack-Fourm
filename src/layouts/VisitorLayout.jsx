@@ -44,7 +44,14 @@ export default function VisitorLayout() {
         <div className={`px-4 py-2.5 text-xs sm:text-sm font-semibold flex items-center justify-between shadow-md border-b transition-all ${getBannerColor(announcement.type)}`}>
           <div className="flex items-center gap-2 max-w-6xl mx-auto w-full pr-2">
             {getBannerIcon(announcement.type)}
-            <span className="leading-snug">{announcement.message}</span>
+            <span className="leading-snug">
+              {announcement.park_name && announcement.park_name !== 'All Parks' && (
+                <span className="mr-1.5 px-2 py-0.5 bg-black/20 rounded font-bold uppercase text-[11px]">
+                  [{announcement.park_name}]
+                </span>
+              )}
+              {announcement.message}
+            </span>
           </div>
           <button 
             onClick={() => setDismissed(true)} 

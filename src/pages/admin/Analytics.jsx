@@ -22,6 +22,8 @@ export default function Analytics() {
   const [announcementForm, setAnnouncementForm] = useState({
     message: '',
     type: 'info', // 'info' | 'warning' | 'emergency'
+    park_id: '',
+    park_name: 'All Parks',
     active: true,
   });
 
@@ -35,6 +37,8 @@ export default function Analytics() {
           setAnnouncementForm({
             message: currentAlert.message || '',
             type: currentAlert.type || 'info',
+            park_id: currentAlert.park_id || '',
+            park_name: currentAlert.park_name || 'All Parks',
             active: currentAlert.active !== false,
           });
         }
@@ -172,26 +176,52 @@ export default function Analytics() {
         </div>
 
         <form onSubmit={handleSaveAnnouncement} className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+            {/* Park Target Selector */}
+            <div className="md:col-span-1">
+              <select
+                value={announcementForm.park_id}
+                onChange={(e) => {
+                  const pId = e.target.value;
+                  const selectedPark = parks.find((p) => p.id === pId);
+                  setAnnouncementForm({
+                    ...announcementForm,
+                    park_id: pId,
+                    park_name: selectedPark ? selectedPark.name : 'All Parks',
+                  });
+                }}
+                className="gov-select text-xs sm:text-sm font-semibold"
+              >
+                <option value="">🌐 All Parks</option>
+                {parks.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    🌳 {p.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Announcement Message */}
             <div className="md:col-span-3">
               <input
                 type="text"
                 value={announcementForm.message}
                 onChange={(e) => setAnnouncementForm({ ...announcementForm, message: e.target.value })}
-                placeholder="e.g. Ross Hill View Park closed tomorrow morning 6 AM - 11 AM for fountain cleaning"
+                placeholder="e.g. Park closed tomorrow morning 6 AM - 11 AM for fountain cleaning"
                 className="gov-input text-xs sm:text-sm"
               />
             </div>
 
-            <div>
+            {/* Banner Severity Type */}
+            <div className="md:col-span-1">
               <select
                 value={announcementForm.type}
                 onChange={(e) => setAnnouncementForm({ ...announcementForm, type: e.target.value })}
                 className="gov-select text-xs sm:text-sm"
               >
-                <option value="info">🔵 Informational (Blue)</option>
-                <option value="warning">🟡 Maintenance Warning (Amber)</option>
-                <option value="emergency">🔴 Emergency Closure (Red)</option>
+                <option value="info">🔵 Info (Blue)</option>
+                <option value="warning">🟡 Warning (Amber)</option>
+                <option value="emergency">🔴 Emergency (Red)</option>
               </select>
             </div>
           </div>

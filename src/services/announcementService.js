@@ -20,6 +20,8 @@ export function setBroadcastAnnouncement(payload) {
       const announcementData = {
         message: payload.message.trim(),
         type: payload.type || 'info', // 'info' | 'warning' | 'emergency'
+        park_id: payload.park_id || '',
+        park_name: payload.park_name || 'All Parks',
         active: payload.active !== false,
         updatedAt: new Date().toISOString(),
       };

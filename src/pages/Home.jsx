@@ -7,7 +7,7 @@ import { PARK_IMAGES } from '../utils/constants';
 import { getVisitCount } from '../services/visitService';
 import { getAverageRatings } from '../services/feedbackService';
 import { getComplaints } from '../services/maintenanceService';
-import ParkMap from '../components/ParkMap';
+import { getAllParks } from '../services/parkService';
 
 export default function Home() {
   const [stats, setStats] = useState({
@@ -156,15 +156,6 @@ export default function Home() {
                   ))}
                 </select>
               </div>
-            </div>
-
-            {/* Interactive Municipal Park Map */}
-            <div className="mb-6">
-              <div className="mb-2 flex items-center justify-between">
-                <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">🗺️ Interactive Municipal Live Map</span>
-                <span className="text-xs text-gray-400">Click any marker to check in or report issues</span>
-              </div>
-              <ParkMap parks={parks} height="380px" />
             </div>
 
             {/* Parks Grid */}

@@ -3,7 +3,6 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { getParkByQrCode, getAllParks } from '../services/parkService';
 import { logVisit } from '../services/visitService';
 import { getDeviceId, getCurrentDate, formatTime } from '../utils/helpers';
-import ParkMap from '../components/ParkMap';
 import Button from '../components/Button';
 import Card from '../components/Card';
 import Loader from '../components/Loader';
@@ -106,25 +105,18 @@ export default function CheckIn() {
           </div>
           
           {!qrCode && !park && (
-             <div className="space-y-4 text-left mb-6">
-                <div className="gov-form-group">
-                  <label className="gov-label font-semibold">Select Park</label>
-                  <select 
-                    className="gov-select" 
-                    value={selectedParkId} 
-                    onChange={handleParkChange}
-                  >
-                    <option value="">-- Choose a Park --</option>
-                    {allParks.map(p => (
-                      <option key={p.id} value={p.id}>{p.name} - {p.ward}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="pt-2">
-                  <div className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Or Select Park via Interactive Map:</div>
-                  <ParkMap parks={allParks} height="280px" zoom={11} />
-                </div>
+             <div className="gov-form-group text-left mb-6">
+                <label className="gov-label font-semibold">Select Park</label>
+                <select 
+                  className="gov-select" 
+                  value={selectedParkId} 
+                  onChange={handleParkChange}
+                >
+                  <option value="">-- Choose a Park --</option>
+                  {allParks.map(p => (
+                    <option key={p.id} value={p.id}>{p.name} - {p.ward}</option>
+                  ))}
+                </select>
              </div>
            )}
 

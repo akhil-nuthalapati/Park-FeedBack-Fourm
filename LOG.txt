@@ -14,6 +14,11 @@ NOTES: Analyzed README.md, assessed empty scaffold, created 11-phase plan.
        All existing files are empty (0 bytes). Full greenfield build required.
 ---
 
+[2026-07-31 15:38:00] CHECKPOINT 13 — Database Data Wipe Script Created
+STATUS: COMPLETED
+FILES: supabase/clear_data.sql
+NOTES: Created clear_data.sql to wipe placeholder rows from visits, feedback, and maintenance_requests tables while preserving active park attributes for clean user testing.
+---
 [2026-07-31 14:57:00] CHECKPOINT 12 — GVMC Contact Updates & Standalone Admin Portal Created
 STATUS: COMPLETED
 FILES: src/components/Footer.jsx, src/pages/Home.jsx, admin-portal/*

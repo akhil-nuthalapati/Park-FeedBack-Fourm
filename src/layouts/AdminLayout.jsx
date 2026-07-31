@@ -21,6 +21,7 @@ const sidebarLinks = [
   { path: '/admin/analytics', label: 'Visitor Analytics', icon: BarChart3 },
   { path: '/admin/feedback', label: 'Feedback', icon: MessageSquare },
   { path: '/admin/maintenance', label: 'Maintenance Requests', icon: Wrench },
+  { path: '/admin/employees', label: 'Staff Management', icon: Users },
   { path: '/admin/settings', label: 'Settings', icon: Settings },
 ];
 

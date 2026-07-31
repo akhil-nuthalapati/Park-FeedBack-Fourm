@@ -6,7 +6,8 @@ import { RATING_LABELS } from '../../utils/constants';
 import Breadcrumb from '../../components/Breadcrumb';
 import { SkeletonTable } from '../../components/Loader';
 import RatingStars from '../../components/RatingStars';
-import { MessageSquare, Filter, X, Building, User, Eye } from 'lucide-react';
+import { MessageSquare, Filter, X, Building, User, Eye, Download } from 'lucide-react';
+import { useToast } from '../../components/Toast';
 
 export default function FeedbackManagement() {
   const [loading, setLoading] = useState(true);
@@ -14,6 +15,7 @@ export default function FeedbackManagement() {
   const [parks, setParks] = useState([]);
   const [totalCount, setTotalCount] = useState(0);
   const [selectedFeedback, setSelectedFeedback] = useState(null);
+  const toast = useToast();
   
   // Filters
   const [filters, setFilters] = useState({
@@ -55,6 +57,37 @@ export default function FeedbackManagement() {
     setFilters(prev => ({ ...prev, [name]: value }));
   };
 
+  const handleExportCSV = () => {
+    try {
+      const headers = ['Date', 'Park Name', 'Overall Rating', 'Cleanliness', 'Safety', 'Facilities', 'Greenery', 'Lighting', 'Playground', 'Washroom', 'Visitor Review'];
+      const rows = feedback.map((item) => [
+        `"${new Date(item.created_at).toLocaleDateString()}"`,
+        `"${item.parks?.name || 'Unknown'}"`,
+        item.overall_rating || 0,
+        item.cleanliness || '',
+        item.safety || '',
+        item.facilities || '',
+        item.greenery || '',
+        item.lighting || '',
+        item.playground || '',
+        item.washroom || '',
+        `"${(item.suggestion || '').replace(/"/g, '""')}"`,
+      ]);
+
+      const csvContent = [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `Visitor_Feedback_Report_${new Date().toISOString().split('T')[0]}.csv`;
+      link.click();
+      toast.success('Visitor feedback data exported as CSV!');
+    } catch (err) {
+      console.error(err);
+      toast.error('Failed to export CSV report.');
+    }
+  };
+
   return (
     <div>
       <Breadcrumb items={[{ label: 'Feedback Management' }]} />
@@ -65,8 +98,16 @@ export default function FeedbackManagement() {
           Visitor Feedback
         </h1>
         
-        {/* Filters */}
-        <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
+        {/* Filters & Export */}
+        <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto items-center">
+          <button
+            onClick={handleExportCSV}
+            className="px-3.5 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-semibold rounded-xl border border-emerald-200 inline-flex items-center gap-1.5 transition-colors shadow-xs"
+          >
+            <Download size={15} />
+            <span>Export CSV</span>
+          </button>
+
           <div className="relative flex-1 sm:w-48">
             <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
               <Filter size={16} className="text-gray-400" />

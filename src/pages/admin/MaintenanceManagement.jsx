@@ -7,7 +7,7 @@ import Breadcrumb from '../../components/Breadcrumb';
 import { SkeletonTable } from '../../components/Loader';
 import { useToast } from '../../components/Toast';
 import Modal from '../../components/Modal';
-import { Wrench, CheckCircle, Image as ImageIcon, ExternalLink, AlertCircle, X, Search } from 'lucide-react';
+import { Wrench, CheckCircle, Image as ImageIcon, ExternalLink, AlertCircle, X, Search, Download } from 'lucide-react';
 
 export default function MaintenanceManagement() {
   const [loading, setLoading] = useState(true);
@@ -112,6 +112,33 @@ export default function MaintenanceManagement() {
     );
   });
 
+  const handleExportCSV = () => {
+    try {
+      const headers = ['Request ID', 'Date', 'Park Name', 'Issue Category', 'Priority', 'Status', 'Description'];
+      const rows = filteredRequests.map((req) => [
+        `"${req.id.substring(0, 8)}"`,
+        `"${new Date(req.created_at).toLocaleDateString()}"`,
+        `"${req.parks?.name || 'Unknown'}"`,
+        `"${req.issue_type || ''}"`,
+        req.priority || 'medium',
+        req.status || 'open',
+        `"${(req.description || '').replace(/"/g, '""')}"`,
+      ]);
+
+      const csvContent = [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `Maintenance_Requests_Report_${new Date().toISOString().split('T')[0]}.csv`;
+      link.click();
+      toast.success('Maintenance requests exported as CSV!');
+    } catch (err) {
+      console.error(err);
+      toast.error('Failed to export CSV report.');
+    }
+  };
+
   return (
     <div>
       <Breadcrumb items={[{ label: 'Maintenance Requests' }]} />
@@ -122,8 +149,16 @@ export default function MaintenanceManagement() {
           Maintenance Management
         </h1>
         
-        {/* Filters */}
-        <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
+        {/* Filters & Export */}
+        <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto items-center">
+          <button
+            onClick={handleExportCSV}
+            className="px-3.5 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-semibold rounded-xl border border-emerald-200 inline-flex items-center gap-1.5 transition-colors shadow-xs"
+          >
+            <Download size={15} />
+            <span>Export CSV</span>
+          </button>
+
           <div className="relative flex-1 sm:w-64">
             <input
               type="text"

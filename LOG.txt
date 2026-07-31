@@ -14,6 +14,11 @@ NOTES: Analyzed README.md, assessed empty scaffold, created 11-phase plan.
        All existing files are empty (0 bytes). Full greenfield build required.
 ---
 
+[2026-07-31 16:10:00] CHECKPOINT 15 — RLS Profiles Policy Updated
+STATUS: COMPLETED
+FILES: supabase/policies.sql
+NOTES: Updated profiles SELECT RLS policy to allow all authenticated staff roles to view employee profiles, enabling smooth role assignment and staff name resolution.
+---
 [2026-07-31 15:45:00] CHECKPOINT 14 — UI Enhancements & Continuous Marquee Ticker Added
 STATUS: COMPLETED
 FILES: src/index.css, src/components/Navbar.jsx, src/pages/Home.jsx

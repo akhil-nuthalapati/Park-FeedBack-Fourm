@@ -188,12 +188,13 @@ CREATE POLICY "admin_delete_maintenance"
 -- 6. PROFILES POLICIES
 -- ---------------------------------------------------------------------------
 
--- Authenticated users can read their own profile
+-- Authenticated users (all staff roles) can read profiles
 DROP POLICY IF EXISTS "auth_read_own_profile" ON profiles;
-CREATE POLICY "auth_read_own_profile"
+DROP POLICY IF EXISTS "auth_read_profiles" ON profiles;
+CREATE POLICY "auth_read_profiles"
   ON profiles FOR SELECT
   TO authenticated
-  USING (auth_user_id = auth.uid() OR current_user_role() = 'SUPER_ADMIN');
+  USING (true);
 
 -- Only SUPER_ADMIN can insert new profiles (create employees)
 DROP POLICY IF EXISTS "super_admin_insert_profiles" ON profiles;

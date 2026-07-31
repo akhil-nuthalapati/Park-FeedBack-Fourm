@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { getAllParks, createPark, updatePark } from '../../services/parkService';
+import { getAllParkVisitCounts } from '../../services/visitService';
 import { formatDate } from '../../utils/helpers';
 import Breadcrumb from '../../components/Breadcrumb';
 import { SkeletonTable } from '../../components/Loader';
@@ -21,11 +22,13 @@ import {
   Wand2,
   Download,
   Copy,
+  Users,
 } from 'lucide-react';
 
 export default function ParkManagement() {
   const [loading, setLoading] = useState(true);
   const [parks, setParks] = useState([]);
+  const [visitCounts, setVisitCounts] = useState({});
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const toast = useToast();
@@ -91,15 +94,21 @@ export default function ParkManagement() {
   const loadParks = async () => {
     setLoading(true);
     try {
-      const { data, error } = await getAllParks();
-      if (!error && data) {
-        setParks(data);
-      } else if (error) {
+      const [parksRes, countsRes] = await Promise.all([
+        getAllParks(),
+        getAllParkVisitCounts(),
+      ]);
+      if (!parksRes.error && parksRes.data) {
+        setParks(parksRes.data);
+      } else if (parksRes.error) {
         toast.error('Failed to load parks data.');
+      }
+      if (countsRes.data) {
+        setVisitCounts(countsRes.data);
       }
     } catch (err) {
       console.error(err);
-      toast.error('Error fetching parks.');
+      toast.error('Error fetching parks data.');
     } finally {
       setLoading(false);
     }
@@ -332,8 +341,8 @@ export default function ParkManagement() {
                 <tr>
                   <th>Park Details</th>
                   <th>Ward</th>
-                  <th>Coordinates</th>
                   <th>Status</th>
+                  <th>Total Check-Ins</th>
                   <th>QR Check-In Code</th>
                   <th>Created Date</th>
                   <th>Actions</th>
@@ -355,12 +364,13 @@ export default function ParkManagement() {
                           {p.ward || 'N/A'}
                         </span>
                       </td>
-                      <td className="text-xs font-mono text-gray-500">
-                        {p.latitude && p.longitude
-                          ? `${Number(p.latitude).toFixed(4)}, ${Number(p.longitude).toFixed(4)}`
-                          : 'Not specified'}
-                      </td>
                       <td>{getStatusBadge(p.status)}</td>
+                      <td>
+                        <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-blue-50 text-blue-700 font-mono font-bold text-xs rounded-full border border-blue-100 shadow-2xs">
+                          <Users size={13} className="text-blue-600" />
+                          <span>{(visitCounts[p.id] || 0).toLocaleString()} Check-ins</span>
+                        </div>
+                      </td>
                       <td>
                         <button
                           onClick={() => {

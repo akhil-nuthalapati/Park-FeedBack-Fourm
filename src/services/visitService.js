@@ -50,3 +50,17 @@ export async function getDailyVisitors(parkId = null, days = 30) {
   const chartData = Object.entries(grouped).map(([date, count]) => ({ date, visitors: count }));
   return { data: chartData, error: null };
 }
+
+export async function getAllParkVisitCounts() {
+  const { data, error } = await supabase.from('visits').select('park_id');
+  if (error || !data) return { data: {}, error };
+
+  const countsMap = {};
+  data.forEach((v) => {
+    if (v.park_id) {
+      countsMap[v.park_id] = (countsMap[v.park_id] || 0) + 1;
+    }
+  });
+
+  return { data: countsMap, error: null };
+}

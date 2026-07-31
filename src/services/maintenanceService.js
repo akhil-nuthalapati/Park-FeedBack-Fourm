@@ -1,10 +1,43 @@
 import { supabase } from './supabase';
 
+// Map detailed issue titles to valid Postgres issue_type ENUM values ('equipment'|'lighting'|'hygiene'|'safety'|'greenery'|'other')
+export function mapToValidIssueTypeEnum(selectedIssue) {
+  if (!selectedIssue) return 'other';
+  const str = String(selectedIssue).toLowerCase();
+
+  const validEnums = ['equipment', 'lighting', 'hygiene', 'safety', 'greenery', 'other'];
+  if (validEnums.includes(str)) {
+    return str;
+  }
+
+  if (str.includes('light') || str.includes('lamp') || str.includes('electric') || str.includes('pole') || str.includes('dark')) {
+    return 'lighting';
+  }
+  if (str.includes('bench') || str.includes('swing') || str.includes('slide') || str.includes('equipment') || str.includes('gate') || str.includes('fence') || str.includes('play') || str.includes('fountain') || str.includes('pipe')) {
+    return 'equipment';
+  }
+  if (str.includes('clean') || str.includes('garbage') || str.includes('trash') || str.includes('washroom') || str.includes('toilet') || str.includes('leak') || str.includes('smell') || str.includes('hygiene') || str.includes('waste') || str.includes('dustbin')) {
+    return 'hygiene';
+  }
+  if (str.includes('tree') || str.includes('grass') || str.includes('plant') || str.includes('green') || str.includes('branch') || str.includes('lawn') || str.includes('flower')) {
+    return 'greenery';
+  }
+  if (str.includes('safe') || str.includes('security') || str.includes('guard') || str.includes('cctv') || str.includes('hazard') || str.includes('snake') || str.includes('broken glass')) {
+    return 'safety';
+  }
+
+  return 'other';
+}
+
 export async function submitComplaint(payload) {
+  const enumType = mapToValidIssueTypeEnum(payload.issue_type);
+  const titlePrefix = payload.issue_type && payload.issue_type !== enumType ? `[Issue Category: ${payload.issue_type}]\n` : '';
+  const fullDescription = `${titlePrefix}${payload.description || ''}`;
+
   const finalPayload = {
     park_id: payload.park_id,
-    issue_type: payload.issue_type || 'other',
-    description: payload.description || '',
+    issue_type: enumType, // Guaranteed valid Postgres ENUM value
+    description: fullDescription,
     priority: payload.priority || 'medium',
     status: 'open',
     photo_url: payload.photo_url || null,
@@ -15,6 +48,14 @@ export async function submitComplaint(payload) {
     .insert([finalPayload])
     .select()
     .single();
+
+  // Retry fallback with 'other' if any legacy schema constraint triggers 22P02
+  if (error && (error.code === '22P02' || error.status === 400)) {
+    console.warn('Enum mismatch detected, retrying with fallback issue_type "other":', error);
+    finalPayload.issue_type = 'other';
+    const retryRes = await supabase.from('maintenance_requests').insert([finalPayload]).select().single();
+    return { data: retryRes.data, error: retryRes.error };
+  }
 
   return { data, error };
 }

@@ -18,10 +18,10 @@ export async function getBroadcastAnnouncement() {
       return dbAnnouncement;
     }
   } catch (e) {
-    console.error('Supabase announcement fetch error:', e);
+    // Silent catch for table missing 404
   }
 
-  // 2. Fallback to localStorage if offline/table not created
+  // 2. Fallback to localStorage if offline/table not created yet
   try {
     const local = localStorage.getItem(ANNOUNCEMENT_KEY);
     return local ? JSON.parse(local) : null;
@@ -57,7 +57,6 @@ export async function setBroadcastAnnouncement(payload) {
 
     return { data: data || announcementData, error: null };
   } catch (e) {
-    console.error('Supabase set announcement error:', e);
     return { data: announcementData, error: null };
   }
 }
@@ -69,6 +68,6 @@ export async function clearBroadcastAnnouncement() {
   try {
     await supabase.from('announcements').update({ active: false }).eq('active', true);
   } catch (e) {
-    console.error('Supabase clear announcement error:', e);
+    // Silent catch
   }
 }

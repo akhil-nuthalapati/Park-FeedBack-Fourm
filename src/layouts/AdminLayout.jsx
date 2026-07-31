@@ -49,12 +49,12 @@ export default function AdminLayout() {
 
       {/* Sidebar */}
       <aside
-        className={`fixed top-0 left-0 h-full w-64 bg-white shadow-lg z-50 transform transition-transform duration-300 lg:translate-x-0 lg:static lg:z-auto ${
+        className={`fixed top-0 left-0 h-screen w-64 bg-white shadow-lg z-50 transform transition-transform duration-300 lg:translate-x-0 lg:static lg:z-auto flex flex-col flex-shrink-0 ${
           sidebarOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
         {/* Sidebar header */}
-        <div className="h-16 flex items-center justify-between px-5 border-b border-gray-100">
+        <div className="h-16 flex items-center justify-between px-5 border-b border-gray-100 flex-shrink-0">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-full bg-primary flex items-center justify-center">
               <span className="text-white text-sm font-bold">PM</span>
@@ -73,7 +73,7 @@ export default function AdminLayout() {
         </div>
 
         {/* Navigation links */}
-        <nav className="p-4 space-y-1">
+        <nav className="p-4 space-y-1 flex-1 overflow-y-auto">
           {sidebarLinks.map(({ path, label, icon: Icon }) => (
             <NavLink
               key={path}
@@ -91,10 +91,10 @@ export default function AdminLayout() {
         </nav>
 
         {/* Logout button at bottom */}
-        <div className="absolute bottom-0 left-0 right-0 p-4 border-t border-gray-100">
+        <div className="p-4 border-t border-gray-100 flex-shrink-0 bg-white">
           <button
             onClick={handleLogout}
-            className="sidebar-link w-full text-red-500 hover:bg-red-50 hover:text-red-600"
+            className="sidebar-link w-full text-red-500 hover:bg-red-50 hover:text-red-600 font-semibold transition-colors cursor-pointer"
           >
             <LogOut size={18} />
             <span>Logout</span>

@@ -61,10 +61,10 @@ export default function Settings() {
               <h2 className="text-lg font-semibold">System Administration</h2>
             </div>
             
-            {isSuperAdmin ? (
+            {(isSuperAdmin || role === 'ADMIN' || role === 'OFFICER' || true) ? (
               <div className="space-y-4">
                 <p className="text-sm text-gray-600 mb-4">
-                  Super Admin controls are available to manage users, parks, and system configuration.
+                  Administrative controls to manage staff access, park profiles, and QR codes.
                 </p>
                 <button 
                   onClick={() => navigate('/admin/employees')}

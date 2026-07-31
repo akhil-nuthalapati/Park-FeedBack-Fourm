@@ -102,6 +102,8 @@ export default function App() {
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
+    setSession(null);
+    setUserProfile(null);
   };
 
   const handleCreateUser = async (e) => {

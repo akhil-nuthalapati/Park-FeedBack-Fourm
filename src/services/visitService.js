@@ -3,9 +3,7 @@ import { supabase } from './supabase';
 export async function logVisit(parkId, deviceId = null) {
   const { data, error } = await supabase
     .from('visits')
-    .insert([{ park_id: parkId, device_id: deviceId }])
-    .select()
-    .single();
+    .insert([{ park_id: parkId, device_id: deviceId }]);
   return { data, error };
 }
 

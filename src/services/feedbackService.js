@@ -1,7 +1,7 @@
 import { supabase } from './supabase';
 
 export async function submitFeedback(payload) {
-  const { data, error } = await supabase.from('feedback').insert([payload]).select().single();
+  const { data, error } = await supabase.from('feedback').insert([payload]);
   return { data, error };
 }
 

@@ -1,7 +1,7 @@
 import { supabase } from './supabase';
 
 export async function submitComplaint(payload) {
-  const { data, error } = await supabase.from('maintenance_requests').insert([payload]).select().single();
+  const { data, error } = await supabase.from('maintenance_requests').insert([payload]);
   return { data, error };
 }
 

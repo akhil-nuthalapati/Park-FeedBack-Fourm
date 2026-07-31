@@ -14,6 +14,11 @@ NOTES: Analyzed README.md, assessed empty scaffold, created 11-phase plan.
        All existing files are empty (0 bytes). Full greenfield build required.
 ---
 
+[2026-07-31 14:57:00] CHECKPOINT 12 — GVMC Contact Updates & Standalone Admin Portal Created
+STATUS: COMPLETED
+FILES: src/components/Footer.jsx, src/pages/Home.jsx, admin-portal/*
+NOTES: Updated footer with real GVMC contact details (helplines 1913, 0891-2868686, commissioner_gvmc@yahoo.co.in). Connected live metrics on Home page. Created standalone admin-portal app for managing admin credentials.
+---
 [2026-07-31 14:12:00] CHECKPOINT 11 — Codebase Comment Cleanup
 STATUS: COMPLETED
 FILES: src/services/*.js, src/utils/*.js, src/context/*, src/hooks/*, supabase/schema.sql, supabase/functions.sql

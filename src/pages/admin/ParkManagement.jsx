@@ -18,6 +18,9 @@ import {
   XCircle,
   X,
   ExternalLink,
+  Wand2,
+  Download,
+  Copy,
 } from 'lucide-react';
 
 export default function ParkManagement() {
@@ -50,6 +53,40 @@ export default function ParkManagement() {
   useEffect(() => {
     loadParks();
   }, []);
+
+  const handleAutoGenerateQr = () => {
+    const slug = (form.name || 'PARK')
+      .toUpperCase()
+      .replace(/[^A-Z0-9]/g, '-')
+      .replace(/-+/g, '-')
+      .slice(0, 15);
+    const randomSuffix = Math.floor(1000 + Math.random() * 9000);
+    setForm((prev) => ({ ...prev, qr_code: `PARK-${slug}-${randomSuffix}` }));
+  };
+
+  const handleCopyCheckinLink = (qrCode) => {
+    const url = `${window.location.origin}/checkin/${qrCode}`;
+    navigator.clipboard.writeText(url);
+    toast.success('Check-In link copied to clipboard!');
+  };
+
+  const handleDownloadQrImage = (parkName, qrCode) => {
+    const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=500x500&data=${encodeURIComponent(
+      `${window.location.origin}/checkin/${qrCode}`
+    )}`;
+    fetch(qrUrl)
+      .then((res) => res.blob())
+      .then((blob) => {
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = `QR-${parkName.replace(/\s+/g, '_')}-${qrCode}.png`;
+        link.click();
+        toast.success(`Downloaded QR Code for ${parkName}`);
+      })
+      .catch(() => {
+        toast.error('Failed to download QR image.');
+      });
+  };
 
   const loadParks = async () => {
     setLoading(true);
@@ -484,9 +521,20 @@ export default function ParkManagement() {
                 </div>
 
                 <div className="gov-form-group">
-                  <label className="gov-label font-semibold">
-                    QR Code Identifier <span className="text-danger">*</span>
-                  </label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="gov-label font-semibold mb-0">
+                      QR Code Identifier <span className="text-danger">*</span>
+                    </label>
+                    <button
+                      type="button"
+                      onClick={handleAutoGenerateQr}
+                      className="text-[11px] font-bold text-primary hover:text-primary-dark inline-flex items-center gap-1 bg-blue-50 px-2 py-0.5 rounded border border-blue-100"
+                      title="Auto-generate QR code based on park name"
+                    >
+                      <Wand2 size={12} />
+                      <span>Auto-Generate</span>
+                    </button>
+                  </div>
                   <input
                     type="text"
                     name="qr_code"
@@ -521,7 +569,7 @@ export default function ParkManagement() {
         </div>
       )}
 
-      {/* QR Code Inspection Modal */}
+      {/* QR Code Inspection & Poster Print Modal */}
       {qrModalOpen && activeQrPark && (
         <div
           className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs animate-fade-in"
@@ -543,11 +591,11 @@ export default function ParkManagement() {
 
             <div className="p-4 bg-gray-50 rounded-2xl border border-gray-200 flex flex-col items-center justify-center">
               <img
-                src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(
+                src={`https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(
                   `${window.location.origin}/checkin/${activeQrPark.qr_code}`
                 )}`}
                 alt={`QR for ${activeQrPark.name}`}
-                className="w-44 h-44 rounded-lg shadow-md border border-white"
+                className="w-48 h-48 rounded-lg shadow-md border border-white"
               />
               <p className="mt-3 font-mono font-bold text-sm text-gray-800 bg-white px-3 py-1 rounded-full border border-gray-200 shadow-xs">
                 {activeQrPark.qr_code}
@@ -559,7 +607,28 @@ export default function ParkManagement() {
               <p className="text-xs text-gray-500">{activeQrPark.location} ({activeQrPark.ward})</p>
             </div>
 
-            <div className="pt-2">
+            {/* Actions: Download Printable Image & Copy Link */}
+            <div className="space-y-2 pt-2">
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleDownloadQrImage(activeQrPark.name, activeQrPark.qr_code)}
+                  className="px-3 py-2 bg-primary hover:bg-primary-dark text-white text-xs font-semibold rounded-xl flex items-center justify-center gap-1.5 shadow-sm transition-colors"
+                >
+                  <Download size={14} />
+                  <span>Download QR</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleCopyCheckinLink(activeQrPark.qr_code)}
+                  className="px-3 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-semibold rounded-xl flex items-center justify-center gap-1.5 transition-colors border border-gray-200"
+                >
+                  <Copy size={14} />
+                  <span>Copy Link</span>
+                </button>
+              </div>
+
               <a
                 href={`/checkin/${activeQrPark.qr_code}`}
                 target="_blank"

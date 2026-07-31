@@ -13,11 +13,13 @@ import {
   Menu,
   X,
   ChevronRight,
+  Trees,
 } from 'lucide-react';
 import { useState } from 'react';
 
 const sidebarLinks = [
   { path: '/admin/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { path: '/admin/parks', label: 'Park Directory', icon: Trees },
   { path: '/admin/analytics', label: 'Visitor Analytics', icon: BarChart3 },
   { path: '/admin/feedback', label: 'Feedback', icon: MessageSquare },
   { path: '/admin/maintenance', label: 'Maintenance Requests', icon: Wrench },

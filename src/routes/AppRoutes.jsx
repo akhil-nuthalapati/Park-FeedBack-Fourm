@@ -18,6 +18,7 @@ import MaintenanceManagement from '../pages/admin/MaintenanceManagement';
 import Analytics from '../pages/admin/Analytics';
 import Settings from '../pages/admin/Settings';
 import EmployeeManagement from '../pages/admin/EmployeeManagement';
+import ParkManagement from '../pages/admin/ParkManagement';
 
 export default function AppRoutes() {
   return (
@@ -38,6 +39,7 @@ export default function AppRoutes() {
       <Route element={<ProtectedRoute />}>
         <Route element={<AdminLayout />}>
           <Route path="/admin/dashboard" element={<Dashboard />} />
+          <Route path="/admin/parks" element={<ParkManagement />} />
           <Route path="/admin/feedback" element={<FeedbackManagement />} />
           <Route path="/admin/maintenance" element={<MaintenanceManagement />} />
           <Route path="/admin/employees" element={<EmployeeManagement />} />

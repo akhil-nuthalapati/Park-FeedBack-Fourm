@@ -73,13 +73,13 @@ export default function Settings() {
                   Manage Employee Access
                 </button>
                 <button 
-                  onClick={() => navigate('/admin/dashboard')}
+                  onClick={() => navigate('/admin/parks')}
                   className="w-full text-left px-4 py-3 bg-gray-50 hover:bg-gray-100 rounded-lg text-sm font-medium transition-colors border border-gray-200"
                 >
                   Manage Park Profiles
                 </button>
                 <button 
-                  onClick={() => navigate('/admin/dashboard')}
+                  onClick={() => navigate('/admin/parks')}
                   className="w-full text-left px-4 py-3 bg-gray-50 hover:bg-gray-100 rounded-lg text-sm font-medium transition-colors border border-gray-200"
                 >
                   QR Code Generator

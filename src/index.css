@@ -232,6 +232,23 @@
   }
 }
 
+/* Continuous Marquee Ticker Animation */
+@keyframes marquee {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
+.animate-marquee {
+  display: flex;
+  width: max-content;
+  white-space: nowrap;
+  animation: marquee 28s linear infinite;
+}
+
+.animate-marquee:hover {
+  animation-play-state: paused;
+}
+
 /* Scrollbar styling */
 ::-webkit-scrollbar {
   width: 6px;

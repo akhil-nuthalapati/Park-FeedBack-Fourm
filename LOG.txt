@@ -14,6 +14,11 @@ NOTES: Analyzed README.md, assessed empty scaffold, created 11-phase plan.
        All existing files are empty (0 bytes). Full greenfield build required.
 ---
 
+[2026-07-31 15:45:00] CHECKPOINT 14 — UI Enhancements & Continuous Marquee Ticker Added
+STATUS: COMPLETED
+FILES: src/index.css, src/components/Navbar.jsx, src/pages/Home.jsx
+NOTES: Implemented continuous horizontal marquee ticker, accessibility font size controls, contrast toggles, official GVMC crest emblem, and live interactive park search & ward filter.
+---
 [2026-07-31 15:38:00] CHECKPOINT 13 — Database Data Wipe Script Created
 STATUS: COMPLETED
 FILES: supabase/clear_data.sql

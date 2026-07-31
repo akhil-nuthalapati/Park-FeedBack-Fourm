@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { getAllParks } from '../services/parkService';
 import { submitComplaint, uploadComplaintPhoto } from '../services/maintenanceService';
 import { validateMaintenance } from '../utils/validators';
-import { ISSUE_CATEGORIES } from '../utils/constants';
+import SearchableSelect from '../components/SearchableSelect';
 import Button from '../components/Button';
 import Card from '../components/Card';
 import { useToast } from '../components/Toast';
@@ -145,17 +145,15 @@ export default function Maintenance() {
 
             <div className="gov-form-group">
               <label className="gov-label font-semibold">Issue Category <span className="text-danger">*</span></label>
-              <select
-                name="issue_type"
+              <SearchableSelect
                 value={form.issue_type}
-                onChange={handleChange}
-                className={`gov-select ${errors.issue_type ? 'border-danger' : ''}`}
-              >
-                <option value="">-- Choose Category --</option>
-                {ISSUE_CATEGORIES.map(c => (
-                  <option key={c.value} value={c.value}>{c.label}</option>
-                ))}
-              </select>
+                onChange={(val) => {
+                  setForm(prev => ({ ...prev, issue_type: val }));
+                  if (errors.issue_type) setErrors(prev => ({ ...prev, issue_type: null }));
+                }}
+                error={errors.issue_type}
+                placeholder="-- Search or Choose Category --"
+              />
               {errors.issue_type && <p className="text-xs text-danger mt-1">{errors.issue_type}</p>}
             </div>
           </div>

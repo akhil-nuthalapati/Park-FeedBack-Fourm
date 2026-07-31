@@ -80,7 +80,7 @@ CREATE TABLE IF NOT EXISTS feedback (
 CREATE TABLE IF NOT EXISTS maintenance_requests (
   id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   park_id      UUID NOT NULL REFERENCES parks(id) ON DELETE CASCADE,
-  issue_type   issue_type NOT NULL,
+  issue_type   TEXT NOT NULL,
   priority     request_priority NOT NULL DEFAULT 'medium',
   description  TEXT NOT NULL,
   photo_url    TEXT,

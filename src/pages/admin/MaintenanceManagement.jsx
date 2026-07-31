@@ -7,13 +7,14 @@ import Breadcrumb from '../../components/Breadcrumb';
 import { SkeletonTable } from '../../components/Loader';
 import { useToast } from '../../components/Toast';
 import Modal from '../../components/Modal';
-import { Wrench, CheckCircle, Image as ImageIcon, ExternalLink, AlertCircle, X } from 'lucide-react';
+import { Wrench, CheckCircle, Image as ImageIcon, ExternalLink, AlertCircle, X, Search } from 'lucide-react';
 
 export default function MaintenanceManagement() {
   const [loading, setLoading] = useState(true);
   const [requests, setRequests] = useState([]);
   const [parks, setParks] = useState([]);
   const [officers, setOfficers] = useState([]);
+  const [searchQuery, setSearchQuery] = useState('');
   
   // Modals state
   const [imageModal, setImageModal] = useState({ open: false, url: '' });
@@ -101,6 +102,16 @@ export default function MaintenanceManagement() {
     }
   };
 
+  const filteredRequests = requests.filter(req => {
+    if (!searchQuery.trim()) return true;
+    const query = searchQuery.toLowerCase();
+    return (
+      (req.issue_type && req.issue_type.toLowerCase().includes(query)) ||
+      (req.description && req.description.toLowerCase().includes(query)) ||
+      (req.parks?.name && req.parks.name.toLowerCase().includes(query))
+    );
+  });
+
   return (
     <div>
       <Breadcrumb items={[{ label: 'Maintenance Requests' }]} />
@@ -112,7 +123,27 @@ export default function MaintenanceManagement() {
         </h1>
         
         {/* Filters */}
-        <div className="flex flex-col sm:flex-row gap-3">
+        <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
+          <div className="relative flex-1 sm:w-64">
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search issue e.g. bench, light, tree..."
+              className="gov-input py-2 text-sm pl-9"
+            />
+            <Search size={16} className="absolute left-3 top-3 text-gray-400" />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                className="absolute right-2.5 top-2.5 text-gray-400 hover:text-gray-600"
+              >
+                <X size={14} />
+              </button>
+            )}
+          </div>
+
           <select
             name="parkId"
             value={filters.parkId}
@@ -158,8 +189,8 @@ export default function MaintenanceManagement() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {requests.length > 0 ? (
-                  requests.map((req) => (
+                {filteredRequests.length > 0 ? (
+                  filteredRequests.map((req) => (
                     <tr key={req.id}>
                       <td className="whitespace-nowrap">
                         <div className="font-mono text-xs text-gray-500 mb-1">#{req.id.substring(0, 6)}</div>

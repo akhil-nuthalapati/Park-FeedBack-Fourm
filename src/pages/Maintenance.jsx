@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getAllParks } from '../services/parkService';
-import { submitComplaint, uploadComplaintPhoto } from '../services/maintenanceService';
+import { submitComplaint, uploadComplaintPhoto, mapToValidIssueTypeEnum } from '../services/maintenanceService';
 import { validateMaintenance } from '../utils/validators';
 import SearchableSelect from '../components/SearchableSelect';
 import Button from '../components/Button';
@@ -90,8 +90,13 @@ export default function Maintenance() {
         photo_url = uploadedUrl;
       }
       
+      const mappedEnum = mapToValidIssueTypeEnum(form.issue_type);
+      const titlePrefix = form.issue_type && form.issue_type !== mappedEnum ? `[Issue Category: ${form.issue_type}]\n` : '';
+
       const payload = {
-        ...form,
+        park_id: form.park_id,
+        issue_type: mappedEnum,
+        description: `${titlePrefix}${form.description || ''}`,
         photo_url,
       };
       

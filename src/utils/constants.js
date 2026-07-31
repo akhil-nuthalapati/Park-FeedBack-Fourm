@@ -1,6 +1,3 @@
-// Park Maintenance System — Constants
-// Color palette, categories, status labels, and configuration values
-
 export const COLORS = {
   primary: '#0B5ED7',
   primaryDark: '#084298',

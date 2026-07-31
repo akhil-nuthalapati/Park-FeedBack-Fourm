@@ -228,7 +228,7 @@ CREATE POLICY "super_admin_delete_profiles"
 -- Create the maintenance-images bucket (public read)
 INSERT INTO storage.buckets (id, name, public)
 VALUES ('maintenance-images', 'maintenance-images', true)
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT (id) DO UPDATE SET public = true;
 
 -- Anonymous users can upload images
 DROP POLICY IF EXISTS "anon_upload_maintenance_images" ON storage.objects;

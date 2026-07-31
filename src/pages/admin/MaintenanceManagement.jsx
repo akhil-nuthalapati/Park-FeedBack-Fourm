@@ -190,10 +190,18 @@ export default function MaintenanceManagement() {
                         {req.photo_url ? (
                           <button 
                             onClick={() => setImageModal({ open: true, url: req.photo_url })}
-                            className="p-2 bg-gray-100 rounded text-gray-600 hover:bg-gray-200 transition-colors"
-                            title="View Photo"
+                            className="flex items-center gap-2 p-1 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded text-gray-700 transition-colors group"
+                            title="Click to Enlarge Photo"
                           >
-                            <ImageIcon size={18} />
+                            <img 
+                              src={req.photo_url} 
+                              alt="Maintenance Issue" 
+                              className="w-10 h-10 object-cover rounded border border-gray-200"
+                              onError={(e) => {
+                                e.target.style.display = 'none';
+                              }}
+                            />
+                            <span className="text-xs font-medium text-primary group-hover:underline">View</span>
                           </button>
                         ) : (
                           <span className="text-xs text-gray-400">N/A</span>

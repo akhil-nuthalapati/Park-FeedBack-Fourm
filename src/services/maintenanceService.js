@@ -45,15 +45,13 @@ export async function submitComplaint(payload) {
 
   const { data, error } = await supabase
     .from('maintenance_requests')
-    .insert([finalPayload])
-    .select()
-    .single();
+    .insert([finalPayload]);
 
   // Retry fallback with 'other' if any legacy schema constraint triggers 22P02
   if (error && (error.code === '22P02' || error.status === 400)) {
     console.warn('Enum mismatch detected, retrying with fallback issue_type "other":', error);
     finalPayload.issue_type = 'other';
-    const retryRes = await supabase.from('maintenance_requests').insert([finalPayload]).select().single();
+    const retryRes = await supabase.from('maintenance_requests').insert([finalPayload]);
     return { data: retryRes.data, error: retryRes.error };
   }
 

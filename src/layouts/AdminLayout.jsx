@@ -1,4 +1,4 @@
-import { Outlet, NavLink, useNavigate } from 'react';
+import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { logout } from '../services/authService';
 import { getNotifications, markNotificationAsRead, markAllNotificationsAsRead } from '../services/notificationService';

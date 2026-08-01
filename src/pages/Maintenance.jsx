@@ -138,7 +138,7 @@ export default function Maintenance() {
     } catch (err) {
       console.error('Submit complaint error:', err);
       toast.error(err.message || 'Failed to submit request. Please try again.');
-    } fontally: {
+    } finally {
       setSubmitting(false);
     }
   };

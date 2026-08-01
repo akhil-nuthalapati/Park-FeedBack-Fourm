@@ -8,6 +8,7 @@ import About from '../pages/About';
 import CheckIn from '../pages/CheckIn';
 import Feedback from '../pages/Feedback';
 import Maintenance from '../pages/Maintenance';
+import TrackStatus from '../pages/TrackStatus';
 import ThankYou from '../pages/ThankYou';
 import Login from '../pages/Login';
 import NotFound from '../pages/NotFound';
@@ -31,6 +32,7 @@ export default function AppRoutes() {
         <Route path="/checkin/:qrCode" element={<CheckIn />} />
         <Route path="/feedback" element={<Feedback />} />
         <Route path="/maintenance" element={<Maintenance />} />
+        <Route path="/track-status" element={<TrackStatus />} />
         <Route path="/thank-you" element={<ThankYou />} />
         <Route path="/login" element={<Login />} />
       </Route>

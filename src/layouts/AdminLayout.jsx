@@ -1,6 +1,7 @@
-import { Outlet, NavLink, useNavigate } from 'react-router-dom';
+import { Outlet, NavLink, useNavigate } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { logout } from '../services/authService';
+import { getNotifications, markNotificationAsRead, markAllNotificationsAsRead } from '../services/notificationService';
 import {
   LayoutDashboard,
   Users,
@@ -14,8 +15,12 @@ import {
   X,
   ChevronRight,
   Trees,
+  CheckCheck,
+  AlertTriangle,
+  Info,
+  CheckCircle2,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 const sidebarLinks = [
   { path: '/admin/dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -31,6 +36,57 @@ export default function AdminLayout() {
   const { profile, role } = useAuth();
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  
+  // Notification states
+  const [notifications, setNotifications] = useState([]);
+  const [notifOpen, setNotifOpen] = useState(false);
+  const notifRef = useRef(null);
+
+  const fetchNotifs = async () => {
+    const { data } = await getNotifications(profile?.id);
+    if (data) {
+      setNotifications(data);
+    }
+  };
+
+  useEffect(() => {
+    fetchNotifs();
+    const interval = setInterval(fetchNotifs, 15000); // refresh every 15s
+    
+    const handleUpdate = () => fetchNotifs();
+    window.addEventListener('notificationsUpdated', handleUpdate);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('notificationsUpdated', handleUpdate);
+    };
+  }, [profile?.id]);
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (notifRef.current && !notifRef.current.contains(e.target)) {
+        setNotifOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const unreadCount = notifications.filter(n => !n.is_read).length;
+
+  const handleNotificationClick = async (notif) => {
+    if (!notif.is_read) {
+      await markNotificationAsRead(notif.id);
+      fetchNotifs();
+    }
+    setNotifOpen(false);
+    navigate('/admin/maintenance');
+  };
+
+  const handleMarkAllRead = async () => {
+    await markAllNotificationsAsRead(profile?.id);
+    fetchNotifs();
+  };
 
   const handleLogout = async () => {
     await logout();
@@ -120,11 +176,102 @@ export default function AdminLayout() {
           </div>
 
           <div className="flex items-center gap-4">
-            {/* Notification bell */}
-            <button className="relative p-2 rounded-lg hover:bg-gray-100 text-gray-500">
-              <Bell size={20} />
-              <span className="absolute top-1 right-1 w-2 h-2 bg-danger rounded-full" />
-            </button>
+            {/* Interactive Notification Center */}
+            <div className="relative" ref={notifRef}>
+              <button
+                onClick={() => setNotifOpen(!notifOpen)}
+                className="relative p-2 rounded-lg hover:bg-gray-100 text-gray-600 transition-colors"
+                title="Notifications"
+              >
+                <Bell size={20} />
+                {unreadCount > 0 && (
+                  <span className="absolute top-1 right-1 min-w-4 h-4 px-1 bg-red-500 text-white text-[10px] font-extrabold rounded-full flex items-center justify-center animate-pulse">
+                    {unreadCount > 9 ? '9+' : unreadCount}
+                  </span>
+                )}
+              </button>
+
+              {/* Dropdown Menu */}
+              {notifOpen && (
+                <div className="absolute right-0 mt-2 w-80 sm:w-96 bg-white rounded-xl shadow-2xl border border-gray-100 z-50 overflow-hidden text-left">
+                  <div className="p-3 bg-slate-900 text-white flex items-center justify-between border-b border-slate-800">
+                    <div className="flex items-center gap-2">
+                      <Bell size={16} className="text-amber-400" />
+                      <span className="font-bold text-sm">Notifications Center</span>
+                      {unreadCount > 0 && (
+                        <span className="bg-amber-400 text-slate-950 text-[10px] font-black px-2 py-0.5 rounded-full">
+                          {unreadCount} UNREAD
+                        </span>
+                      )}
+                    </div>
+                    {unreadCount > 0 && (
+                      <button
+                        onClick={handleMarkAllRead}
+                        className="text-xs text-slate-300 hover:text-white flex items-center gap-1 hover:underline"
+                      >
+                        <CheckCheck size={14} /> Mark all read
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="max-h-96 overflow-y-auto divide-y divide-gray-100">
+                    {notifications.length === 0 ? (
+                      <div className="p-8 text-center text-gray-400 text-sm">
+                        No notifications yet.
+                      </div>
+                    ) : (
+                      notifications.map((n) => {
+                        const isEscalation = n.type === 'escalation';
+                        const isResolution = n.type === 'resolution';
+
+                        return (
+                          <div
+                            key={n.id}
+                            onClick={() => handleNotificationClick(n)}
+                            className={`p-3.5 hover:bg-slate-50 cursor-pointer transition-colors ${!n.is_read ? 'bg-amber-50/40 border-l-4 border-l-amber-500' : ''}`}
+                          >
+                            <div className="flex items-start gap-2.5">
+                              {isEscalation ? (
+                                <AlertTriangle size={18} className="text-red-500 flex-shrink-0 mt-0.5" />
+                              ) : isResolution ? (
+                                <CheckCircle2 size={18} className="text-emerald-500 flex-shrink-0 mt-0.5" />
+                              ) : (
+                                <Wrench size={18} className="text-primary flex-shrink-0 mt-0.5" />
+                              )}
+                              <div className="flex-1 min-w-0">
+                                <p className="text-xs font-bold text-gray-900 leading-snug">
+                                  {n.title}
+                                </p>
+                                <p className="text-xs text-gray-600 mt-1 line-clamp-2">
+                                  {n.message}
+                                </p>
+                                <p className="text-[10px] text-gray-400 mt-1 font-mono">
+                                  {new Date(n.created_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
+                                </p>
+                              </div>
+                              {!n.is_read && (
+                                <span className="w-2 h-2 rounded-full bg-amber-500 flex-shrink-0 mt-1.5" />
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                  <div className="p-2 bg-gray-50 border-t border-gray-100 text-center">
+                    <button
+                      onClick={() => {
+                        setNotifOpen(false);
+                        navigate('/admin/maintenance');
+                      }}
+                      className="text-xs font-bold text-primary hover:underline"
+                    >
+                      View All Maintenance Tickets
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
 
             {/* Profile */}
             <div className="flex items-center gap-3">

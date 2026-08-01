@@ -1,4 +1,15 @@
 import { supabase } from './supabase';
+import { createNotificationsForAllProfiles } from './notificationService';
+
+// Helper to generate readable short ticket lookup code (e.g., MR-83920)
+export function generateTicketCode() {
+  const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+  let code = '';
+  for (let i = 0; i < 5; i++) {
+    code += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return `MR-${code}`;
+}
 
 // Map detailed issue titles to valid Postgres issue_type ENUM values ('equipment'|'lighting'|'hygiene'|'safety'|'greenery'|'other')
 export function mapToValidIssueTypeEnum(selectedIssue) {
@@ -31,31 +42,91 @@ export function mapToValidIssueTypeEnum(selectedIssue) {
 
 export async function submitComplaint(payload) {
   const enumType = mapToValidIssueTypeEnum(payload.issue_type);
+  const ticketCode = generateTicketCode();
+  let priority = payload.priority || 'medium';
+  let isRecurring = false;
+  let recentCount = 1;
+
+  // 1. RECURRING ISSUE DETECTION (Check 3+ complaints for same park + issue_type within 48h)
+  try {
+    const fortyEightHoursAgo = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
+    const { data: recentReports } = await supabase
+      .from('maintenance_requests')
+      .select('id')
+      .eq('park_id', payload.park_id)
+      .eq('issue_type', enumType)
+      .gte('created_at', fortyEightHoursAgo);
+
+    if (recentReports && recentReports.length >= 2) {
+      // 3+ reports total (including current one)
+      isRecurring = true;
+      recentCount = recentReports.length + 1;
+      priority = 'high'; // Auto-escalate priority to high
+    }
+  } catch (e) {
+    console.warn('Error checking recurring complaints:', e);
+  }
+
   const titlePrefix = payload.issue_type && payload.issue_type !== enumType ? `[Issue Category: ${payload.issue_type}]\n` : '';
-  const fullDescription = `${titlePrefix}${payload.description || ''}`;
+  const recurringPrefix = isRecurring ? `[⚡ RECURRING ISSUE AUTO-ESCALATED — ${recentCount} Reports in 48h]\n` : '';
+  const fullDescription = `${recurringPrefix}${titlePrefix}${payload.description || ''}`;
 
   const finalPayload = {
     park_id: payload.park_id,
-    issue_type: enumType, // Guaranteed valid Postgres ENUM value
+    issue_type: enumType,
     description: fullDescription,
-    priority: payload.priority || 'medium',
+    priority,
     status: 'open',
     photo_url: payload.photo_url || null,
+    visitor_phone: payload.visitor_phone || null,
+    ticket_code: ticketCode,
   };
 
-  const { data, error } = await supabase
+  let parkName = 'Park';
+  if (payload.park_name) {
+    parkName = payload.park_name;
+  }
+
+  // 2. Insert into maintenance_requests (no .select() to comply with anon RLS)
+  let { data, error } = await supabase
     .from('maintenance_requests')
     .insert([finalPayload]);
 
-  // Retry fallback with 'other' if any legacy schema constraint triggers 22P02
+  // Fallback if ticket_code column isn't in DB yet
+  if (error && (error.message?.includes('ticket_code') || error.code === '42703')) {
+    delete finalPayload.ticket_code;
+    delete finalPayload.visitor_phone;
+    const retryRes = await supabase.from('maintenance_requests').insert([finalPayload]);
+    error = retryRes.error;
+  }
+
+  // Fallback retry with issue_type 'other' if schema constraint 22P02
   if (error && (error.code === '22P02' || error.status === 400)) {
     console.warn('Enum mismatch detected, retrying with fallback issue_type "other":', error);
     finalPayload.issue_type = 'other';
     const retryRes = await supabase.from('maintenance_requests').insert([finalPayload]);
-    return { data: retryRes.data, error: retryRes.error };
+    error = retryRes.error;
   }
 
-  return { data, error };
+  // 3. TRIGGER NOTIFICATIONS TO ALL PROFILES
+  if (!error) {
+    const notifTitle = isRecurring 
+      ? `⚡ RECURRING ALERT: ${enumType.toUpperCase()} at ${parkName}`
+      : `🚨 New Maintenance Issue: ${enumType.toUpperCase()} at ${parkName}`;
+    
+    const notifMsg = isRecurring
+      ? `⚠️ 3+ reports detected within 48h! Priority auto-escalated to HIGH. Ticket Code: ${ticketCode}`
+      : `New report submitted (${priority} priority). Ticket Code: ${ticketCode}. Description: ${payload.description?.substring(0, 80) || ''}`;
+
+    createNotificationsForAllProfiles({
+      title: notifTitle,
+      message: notifMsg,
+      type: isRecurring ? 'escalation' : 'maintenance',
+      referenceId: ticketCode,
+    });
+  }
+
+  return { data, error, ticketCode, isRecurring, recentCount };
 }
 
 export async function uploadComplaintPhoto(file) {
@@ -122,17 +193,98 @@ export async function assignComplaint(id, employeeId) {
     .eq('id', id)
     .select()
     .single();
+
+  if (!error && data) {
+    createNotificationsForAllProfiles({
+      title: `👤 Staff Assigned to Request`,
+      message: `Maintenance Ticket ${data.ticket_code || id} assigned to officer.`,
+      type: 'info',
+      referenceId: id,
+    });
+  }
+
   return { data, error };
 }
 
-export async function updateStatus(id, status) {
-  const { data, error } = await supabase
+export async function updateStatus(id, status, resolutionNote = null, resolvedBy = null) {
+  const updateFields = { status };
+  if (resolutionNote !== null) {
+    updateFields.resolution_note = resolutionNote;
+  }
+  if (resolvedBy) {
+    updateFields.resolved_by = resolvedBy;
+  }
+  if (status === 'resolved') {
+    updateFields.resolved_at = new Date().toISOString();
+  }
+
+  let { data, error } = await supabase
     .from('maintenance_requests')
-    .update({ status })
+    .update(updateFields)
     .eq('id', id)
     .select()
     .single();
+
+  // Fallback if resolution_note column not present in DB
+  if (error && (error.message?.includes('resolution_note') || error.code === '42703')) {
+    delete updateFields.resolution_note;
+    delete updateFields.resolved_by;
+    const retryRes = await supabase
+      .from('maintenance_requests')
+      .update(updateFields)
+      .eq('id', id)
+      .select()
+      .single();
+    data = retryRes.data;
+    error = retryRes.error;
+  }
+
+  if (!error) {
+    const isResolved = status === 'resolved';
+    createNotificationsForAllProfiles({
+      title: isResolved ? `✅ Maintenance Request Resolved` : `🔄 Request Status Updated: ${status.toUpperCase()}`,
+      message: isResolved 
+        ? `Ticket ${data?.ticket_code || id} has been marked RESOLVED. Note: ${resolutionNote || 'Issue fixed.'}`
+        : `Ticket ${data?.ticket_code || id} status changed to ${status}.`,
+      type: isResolved ? 'resolution' : 'info',
+      referenceId: id,
+    });
+  }
+
   return { data, error };
+}
+
+export async function getComplaintByTicketOrPhone(lookupTerm) {
+  if (!lookupTerm) return { data: [], error: null };
+  const cleanTerm = String(lookupTerm).trim();
+
+  try {
+    // 1. Search by exact ticket_code or phone or id
+    const { data, error } = await supabase
+      .from('maintenance_requests')
+      .select('*, parks(name), profiles(full_name)')
+      .or(`ticket_code.eq.${cleanTerm.toUpperCase()},visitor_phone.eq.${cleanTerm},id.eq.${cleanTerm}`)
+      .order('created_at', { ascending: false });
+
+    if (!error && data && data.length > 0) {
+      return { data, error: null };
+    }
+  } catch (e) {
+    console.warn('DB lookup failed, trying fallback search:', e);
+  }
+
+  // Fallback search with ilike
+  try {
+    const { data, error } = await supabase
+      .from('maintenance_requests')
+      .select('*, parks(name), profiles(full_name)')
+      .ilike('ticket_code', `%${cleanTerm}%`)
+      .order('created_at', { ascending: false });
+
+    return { data: data || [], error };
+  } catch (e) {
+    return { data: [], error: e };
+  }
 }
 
 export async function deleteComplaint(id) {

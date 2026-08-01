@@ -339,7 +339,8 @@ export const PARK_IMAGES = {
 
 export const NAV_LINKS = [
   { path: '/', label: 'Home' },
-  { path: '/about', label: 'About' },
+  { path: '/track-status', label: 'Track Ticket' },
   { path: '/checkin', label: 'Visitor Services' },
+  { path: '/about', label: 'About' },
   { path: '/login', label: 'Dashboard' },
 ];

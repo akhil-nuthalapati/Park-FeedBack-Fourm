@@ -7,12 +7,13 @@ import SearchableSelect from '../components/SearchableSelect';
 import Button from '../components/Button';
 import Card from '../components/Card';
 import { useToast } from '../components/Toast';
-import { Wrench, Upload, X } from 'lucide-react';
+import { Wrench, Upload, X, Phone } from 'lucide-react';
 
 const INITIAL_FORM = {
   park_id: '',
   issue_type: '',
   description: '',
+  visitor_phone: '',
 };
 
 export default function Maintenance() {
@@ -92,25 +93,52 @@ export default function Maintenance() {
       
       const mappedEnum = mapToValidIssueTypeEnum(form.issue_type);
       const titlePrefix = form.issue_type && form.issue_type !== mappedEnum ? `[Issue Category: ${form.issue_type}]\n` : '';
+      const selectedPark = parks.find(p => p.id === form.park_id);
 
       const payload = {
         park_id: form.park_id,
+        park_name: selectedPark?.name || 'Park',
         issue_type: mappedEnum,
         description: `${titlePrefix}${form.description || ''}`,
         photo_url,
+        visitor_phone: form.visitor_phone || null,
       };
       
-      const { error } = await submitComplaint(payload);
-      if (error) {
-        throw new Error(error.message || 'Database error submitting request');
+      const res = await submitComplaint(payload);
+      if (res.error) {
+        throw new Error(res.error.message || 'Database error submitting request');
+      }
+
+      // Store ticket code in localStorage for visitor tracking
+      if (res.ticketCode) {
+        try {
+          const raw = localStorage.getItem('gvmc_recent_tickets');
+          const list = raw ? JSON.parse(raw) : [];
+          if (!list.includes(res.ticketCode)) {
+            list.unshift(res.ticketCode);
+            localStorage.setItem('gvmc_recent_tickets', JSON.stringify(list.slice(0, 10)));
+          }
+        } catch (e) {}
       }
       
-      toast.success('Maintenance request submitted successfully!');
-      navigate('/thank-you', { state: { type: 'maintenance' } });
+      if (res.isRecurring) {
+        toast.info(`⚡ Recurring issue detected (${res.recentCount} reports in 48h)! Priority auto-escalated to HIGH.`);
+      } else {
+        toast.success('Maintenance request submitted successfully!');
+      }
+
+      navigate('/thank-you', { 
+        state: { 
+          type: 'maintenance',
+          ticketCode: res.ticketCode,
+          isRecurring: res.isRecurring,
+          recentCount: res.recentCount,
+        } 
+      });
     } catch (err) {
       console.error('Submit complaint error:', err);
       toast.error(err.message || 'Failed to submit request. Please try again.');
-    } finally {
+    } fontally: {
       setSubmitting(false);
     }
   };
@@ -119,17 +147,20 @@ export default function Maintenance() {
     <div className="page-container max-w-3xl">
       <div className="text-center mb-8">
         <h1 className="section-title">Report Maintenance Issue</h1>
-        <p className="section-subtitle">Help us keep the parks well-maintained and safe.</p>
+        <p className="section-subtitle">Help us keep the parks well-maintained and safe for everyone.</p>
       </div>
 
-      <Card hoverable={false} className="border-t-4 border-t-orange-500">
+      <Card hoverable={false} className="border-t-4 border-t-orange-500 shadow-md">
         <form onSubmit={handleSubmit} className="space-y-6">
           
           <div className="flex items-center gap-3 mb-2 border-b border-gray-100 pb-4">
             <div className="w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center text-orange-500">
               <Wrench size={20} />
             </div>
-            <h2 className="text-lg font-semibold text-gray-800">Issue Details</h2>
+            <div>
+              <h2 className="text-lg font-semibold text-gray-800">Issue Details</h2>
+              <p className="text-xs text-gray-400">All reports trigger real-time notifications to duty staff.</p>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -171,10 +202,31 @@ export default function Maintenance() {
               value={form.description}
               onChange={handleChange}
               className={`gov-textarea ${errors.description ? 'border-danger' : ''}`}
-              placeholder="Please describe the issue in detail (location within park, severity, etc.)"
-              rows={5}
+              placeholder="Please describe the issue in detail (location within park, bench number, broken light pole, etc.)"
+              rows={4}
             />
             {errors.description && <p className="text-xs text-danger mt-1">{errors.description}</p>}
+          </div>
+
+          {/* Optional Visitor Phone for Tracking */}
+          <div className="gov-form-group">
+            <label className="gov-label font-semibold flex items-center justify-between">
+              <span>Contact Mobile Number (Optional for Status Updates)</span>
+              <span className="text-xs text-gray-400 font-normal">SMS / Lookup</span>
+            </label>
+            <div className="relative">
+              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-400">
+                <Phone size={16} />
+              </div>
+              <input
+                type="tel"
+                name="visitor_phone"
+                value={form.visitor_phone}
+                onChange={handleChange}
+                placeholder="e.g. 9876543210 (Allows tracking ticket by mobile number)"
+                className="input-field pl-9"
+              />
+            </div>
           </div>
 
           <div className="gov-form-group">
@@ -194,11 +246,11 @@ export default function Maintenance() {
                 </div>
               ) : (
                 <div 
-                  className="border-2 border-dashed border-gray-300 rounded-lg p-8 flex flex-col items-center justify-center bg-gray-50 hover:bg-gray-100 cursor-pointer transition-colors"
+                  className="border-2 border-dashed border-gray-300 rounded-lg p-6 flex flex-col items-center justify-center bg-gray-50 hover:bg-gray-100 cursor-pointer transition-colors"
                   onClick={() => fileInputRef.current?.click()}
                 >
-                  <Upload size={32} className="text-gray-400 mb-3" />
-                  <p className="text-sm font-medium text-gray-700">Click to upload an image</p>
+                  <Upload size={30} className="text-gray-400 mb-2" />
+                  <p className="text-sm font-medium text-gray-700">Click to upload photo of issue</p>
                   <p className="text-xs text-gray-500 mt-1">PNG, JPG up to 5MB</p>
                 </div>
               )}

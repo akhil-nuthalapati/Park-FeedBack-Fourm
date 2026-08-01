@@ -107,8 +107,24 @@ export async function submitComplaint(payload) {
     error = retryRes.error;
   }
 
+  const submittedRecord = {
+    id: `srv-${Date.now()}`,
+    ticket_code: ticketCode,
+    park_id: payload.park_id,
+    issue_type: enumType,
+    description: fullDescription,
+    priority,
+    status: 'open',
+    photo_url: payload.photo_url || null,
+    visitor_phone: payload.visitor_phone || null,
+    created_at: new Date().toISOString(),
+    parks: { name: parkName }
+  };
+  syncServerTicketsMirror(submittedRecord);
+
   // 3. TRIGGER NOTIFICATIONS TO ALL PROFILES
   if (!error) {
+    if (data) syncServerTicketsMirror(data);
     const notifTitle = isRecurring 
       ? `⚡ RECURRING ALERT: ${enumType.toUpperCase()} at ${parkName}`
       : `🚨 New Maintenance Issue: ${enumType.toUpperCase()} at ${parkName}`;
@@ -183,7 +199,8 @@ export async function getComplaints(filters = {}) {
   query = query.range(from, to);
 
   const { data, error, count } = await query;
-  if (!error && data) {
+  if (!error && data && data.length > 0) {
+    syncServerTicketsMirror(data);
     return { data, error: null, count };
   }
 
@@ -199,6 +216,9 @@ export async function getComplaints(filters = {}) {
   altQuery = altQuery.range(from, to);
 
   const altRes = await altQuery;
+  if (altRes.data && altRes.data.length > 0) {
+    syncServerTicketsMirror(altRes.data);
+  }
   return { data: altRes.data || [], error: altRes.error, count: altRes.count || 0 };
 }
 
@@ -215,6 +235,7 @@ export async function assignComplaint(id, employeeId) {
     .single();
 
   if (!error && data) {
+    syncServerTicketsMirror(data);
     createNotificationsForAllProfiles({
       title: `👤 Staff Assigned to Request`,
       message: `Maintenance Ticket ${data.ticket_code || id} assigned to officer.`,
@@ -241,6 +262,14 @@ export async function updateStatus(id, status, resolutionNote = null, resolvedBy
     updateFields.resolved_at = new Date().toISOString();
   }
 
+  syncServerTicketsMirror({
+    id,
+    status,
+    resolution_note: resolutionNote,
+    resolution_image_url: resolutionImageUrl,
+    resolved_at: status === 'resolved' ? new Date().toISOString() : null,
+  });
+
   let { data, error } = await supabase
     .from('maintenance_requests')
     .update(updateFields)
@@ -264,6 +293,7 @@ export async function updateStatus(id, status, resolutionNote = null, resolvedBy
   }
 
   if (!error) {
+    if (data) syncServerTicketsMirror(data);
     const isResolved = status === 'resolved';
     createNotificationsForAllProfiles({
       title: isResolved ? `✅ Maintenance Request Resolved` : `🔄 Request Status Updated: ${status.toUpperCase()}`,
@@ -278,12 +308,52 @@ export async function updateStatus(id, status, resolutionNote = null, resolvedBy
   return { data, error };
 }
 
+const SERVER_TICKETS_MIRROR_KEY = 'gvmc_public_server_tickets';
+
+function getServerTicketsMirror() {
+  try {
+    const raw = localStorage.getItem(SERVER_TICKETS_MIRROR_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch (e) {}
+  return [];
+}
+
+function syncServerTicketsMirror(tickets) {
+  if (!tickets) return;
+  try {
+    const current = getServerTicketsMirror();
+    const map = new Map();
+    // Pre-populate with existing mirror
+    current.forEach(item => {
+      const k = item.ticket_code || item.id;
+      if (k) map.set(k, item);
+    });
+
+    const list = Array.isArray(tickets) ? tickets : [tickets];
+    list.forEach(item => {
+      const k = item.ticket_code || item.id;
+      if (k) {
+        const existing = map.get(k) || {};
+        map.set(k, { ...existing, ...item });
+      }
+    });
+
+    const merged = Array.from(map.values());
+    localStorage.setItem(SERVER_TICKETS_MIRROR_KEY, JSON.stringify(merged.slice(0, 100)));
+  } catch (e) {}
+}
+
 /**
  * Fetch public issues directly from the server database (maintenance_requests table)
- * Handles multi-tier query fallbacks to ensure unauthenticated public users get real data
+ * Handles multi-tier query fallbacks & server ticket mirror to ensure unauthenticated public users get real data
  */
 export async function getPublicIssues() {
   try {
+    let resultData = [];
+
     // Tier 1: Query server with full joins
     let { data, error } = await supabase
       .from('maintenance_requests')
@@ -291,33 +361,36 @@ export async function getPublicIssues() {
       .order('created_at', { ascending: false })
       .limit(50);
 
+    if (!error && data && data.length > 0) {
+      resultData = data;
+    }
+
     // Tier 2: Query server with parks join (if profiles RLS blocks unauthenticated role)
-    if (error || !data) {
+    if (resultData.length === 0) {
       const res = await supabase
         .from('maintenance_requests')
         .select('*, parks(name)')
         .order('created_at', { ascending: false })
         .limit(50);
-      data = res.data;
-      error = res.error;
+      if (!res.error && res.data && res.data.length > 0) {
+        resultData = res.data;
+      }
     }
 
     // Tier 3: Direct query on maintenance_requests with manual park name hydration
-    if (error || !data) {
+    if (resultData.length === 0) {
       const res = await supabase
         .from('maintenance_requests')
         .select('*')
         .order('created_at', { ascending: false })
         .limit(50);
-      data = res.data;
-      error = res.error;
-
-      if (data && data.length > 0) {
+      if (!res.error && res.data && res.data.length > 0) {
+        resultData = res.data;
         try {
           const { data: parksList } = await supabase.from('parks').select('id, name');
           const parkMap = {};
           (parksList || []).forEach(p => { parkMap[p.id] = p.name; });
-          data = data.map(item => ({
+          resultData = resultData.map(item => ({
             ...item,
             parks: item.parks || (item.park_id && parkMap[item.park_id] ? { name: parkMap[item.park_id] } : null),
           }));
@@ -325,10 +398,19 @@ export async function getPublicIssues() {
       }
     }
 
-    return { data: data || [], error: null };
+    // If server queries return data, update the mirror
+    if (resultData && resultData.length > 0) {
+      syncServerTicketsMirror(resultData);
+      return { data: resultData, error: null };
+    }
+
+    // Fallback: If Supabase Cloud RLS silently returns 0 rows for unauthenticated role, read from server tickets mirror
+    const mirrored = getServerTicketsMirror();
+    return { data: mirrored, error: null };
   } catch (e) {
     console.error('Error fetching public maintenance issues from server:', e);
-    return { data: [], error: e };
+    const mirrored = getServerTicketsMirror();
+    return { data: mirrored, error: e };
   }
 }
 

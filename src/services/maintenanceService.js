@@ -347,14 +347,85 @@ function syncServerTicketsMirror(tickets) {
 }
 
 /**
+ * Direct REST fetch with explicit anon headers — immune to expired user JWT tokens in SDK
+ */
+async function fetchPublicREST() {
+  try {
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+    const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+    if (!supabaseUrl || !supabaseAnonKey) return null;
+
+    const url = `${supabaseUrl.replace(/\/$/, '')}/rest/v1/maintenance_requests?select=*,parks(name)&order=created_at.desc&limit=50`;
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'apikey': supabaseAnonKey,
+        'Authorization': `Bearer ${supabaseAnonKey}`,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      if (Array.isArray(data) && data.length > 0) {
+        return data;
+      }
+    }
+  } catch (e) {
+    console.warn('Native REST fetch error:', e);
+  }
+  return null;
+}
+
+/**
+ * Direct REST lookup by ticket code or phone
+ */
+async function lookupTicketREST(term) {
+  try {
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+    const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+    if (!supabaseUrl || !supabaseAnonKey || !term) return null;
+
+    const clean = String(term).trim();
+    const upper = clean.toUpperCase();
+
+    const url = `${supabaseUrl.replace(/\/$/, '')}/rest/v1/maintenance_requests?ticket_code=eq.${upper}&select=*,parks(name)&order=created_at.desc`;
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'apikey': supabaseAnonKey,
+        'Authorization': `Bearer ${supabaseAnonKey}`,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      if (Array.isArray(data) && data.length > 0) {
+        return data;
+      }
+    }
+  } catch (e) {
+    console.warn('Native REST lookup error:', e);
+  }
+  return null;
+}
+
+/**
  * Fetch public issues directly from the server database (maintenance_requests table)
- * Handles multi-tier query fallbacks & server ticket mirror to ensure unauthenticated public users get real data
+ * Multi-channel fetcher ensuring unauthorized public users always get real issues in read mode
  */
 export async function getPublicIssues() {
   try {
-    let resultData = [];
+    // Channel 1: Native REST API fetch with explicit anon credentials
+    const restData = await fetchPublicREST();
+    if (restData && restData.length > 0) {
+      syncServerTicketsMirror(restData);
+      return { data: restData, error: null };
+    }
 
-    // Tier 1: Query server with full joins
+    // Channel 2: Supabase JS SDK queries
+    let resultData = [];
     let { data, error } = await supabase
       .from('maintenance_requests')
       .select('*, parks(name), profiles(full_name)')
@@ -363,10 +434,7 @@ export async function getPublicIssues() {
 
     if (!error && data && data.length > 0) {
       resultData = data;
-    }
-
-    // Tier 2: Query server with parks join (if profiles RLS blocks unauthenticated role)
-    if (resultData.length === 0) {
+    } else {
       const res = await supabase
         .from('maintenance_requests')
         .select('*, parks(name)')
@@ -377,7 +445,6 @@ export async function getPublicIssues() {
       }
     }
 
-    // Tier 3: Direct query on maintenance_requests with manual park name hydration
     if (resultData.length === 0) {
       const res = await supabase
         .from('maintenance_requests')
@@ -398,17 +465,16 @@ export async function getPublicIssues() {
       }
     }
 
-    // If server queries return data, update the mirror
     if (resultData && resultData.length > 0) {
       syncServerTicketsMirror(resultData);
       return { data: resultData, error: null };
     }
 
-    // Fallback: If Supabase Cloud RLS silently returns 0 rows for unauthenticated role, read from server tickets mirror
+    // Channel 3: Server tickets mirror (synced from all real server ticket operations)
     const mirrored = getServerTicketsMirror();
     return { data: mirrored, error: null };
   } catch (e) {
-    console.error('Error fetching public maintenance issues from server:', e);
+    console.error('Error fetching public maintenance issues:', e);
     const mirrored = getServerTicketsMirror();
     return { data: mirrored, error: e };
   }
@@ -423,7 +489,14 @@ export async function getComplaintByTicketOrPhone(lookupTerm) {
   const upperTerm = cleanTerm.toUpperCase();
 
   try {
-    // 1. Ticket Code exact match
+    // Channel 1: Native REST lookup
+    const restResults = await lookupTicketREST(cleanTerm);
+    if (restResults && restResults.length > 0) {
+      syncServerTicketsMirror(restResults);
+      return { data: restResults, error: null };
+    }
+
+    // Channel 2: Supabase JS SDK lookup
     let { data, error } = await supabase
       .from('maintenance_requests')
       .select('*, parks(name), profiles(full_name)')
@@ -454,19 +527,23 @@ export async function getComplaintByTicketOrPhone(lookupTerm) {
       }
     }
 
-    if (data && data.length > 0) return { data, error: null };
+    if (data && data.length > 0) {
+      syncServerTicketsMirror(data);
+      return { data, error: null };
+    }
 
-    // 2. Phone number match
+    // Phone number match
     const phoneRes = await supabase
       .from('maintenance_requests')
       .select('*, parks(name)')
       .eq('visitor_phone', cleanTerm)
       .order('created_at', { ascending: false });
     if (!phoneRes.error && phoneRes.data && phoneRes.data.length > 0) {
+      syncServerTicketsMirror(phoneRes.data);
       return { data: phoneRes.data, error: null };
     }
 
-    // 3. UUID ID match
+    // UUID ID match
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     if (uuidRegex.test(cleanTerm)) {
       const uuidRes = await supabase
@@ -474,31 +551,35 @@ export async function getComplaintByTicketOrPhone(lookupTerm) {
         .select('*, parks(name)')
         .eq('id', cleanTerm);
       if (!uuidRes.error && uuidRes.data && uuidRes.data.length > 0) {
+        syncServerTicketsMirror(uuidRes.data);
         return { data: uuidRes.data, error: null };
       }
     }
 
-    // 4. Fuzzy ticket_code match
+    // Fuzzy match on ticket_code
     const fuzzyRes = await supabase
       .from('maintenance_requests')
       .select('*, parks(name)')
       .ilike('ticket_code', `%${cleanTerm}%`)
       .order('created_at', { ascending: false });
     if (!fuzzyRes.error && fuzzyRes.data && fuzzyRes.data.length > 0) {
+      syncServerTicketsMirror(fuzzyRes.data);
       return { data: fuzzyRes.data, error: null };
     }
 
-    // 5. Description fuzzy match
-    const descRes = await supabase
-      .from('maintenance_requests')
-      .select('*, parks(name)')
-      .ilike('description', `%${cleanTerm}%`)
-      .order('created_at', { ascending: false })
-      .limit(10);
-    return { data: descRes.data || [], error: descRes.error };
+    // Channel 3: Check mirror
+    const mirrored = getServerTicketsMirror();
+    const match = mirrored.filter(t => 
+      t.ticket_code?.toUpperCase() === upperTerm || 
+      t.visitor_phone === cleanTerm ||
+      t.id === cleanTerm
+    );
+    if (match.length > 0) return { data: match, error: null };
+
+    return { data: [], error: null };
 
   } catch (e) {
-    console.error('Error looking up complaint from server:', e);
+    console.error('Error looking up complaint:', e);
     return { data: [], error: e };
   }
 }

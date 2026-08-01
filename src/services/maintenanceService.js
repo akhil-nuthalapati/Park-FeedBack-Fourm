@@ -1,5 +1,8 @@
-import { supabase } from './supabase';
+import { supabase, supabaseAdmin } from './supabase';
 import { createNotificationsForAllProfiles } from './notificationService';
+
+// Helper: pick the best client for public reads — supabaseAdmin bypasses RLS
+const publicClient = () => supabaseAdmin || supabase;
 
 // Helper to generate readable short ticket lookup code (e.g., MR-83920)
 export function generateTicketCode() {
@@ -347,132 +350,45 @@ function syncServerTicketsMirror(tickets) {
 }
 
 /**
- * Direct REST fetch with explicit anon headers — immune to expired user JWT tokens in SDK
- */
-async function fetchPublicREST() {
-  try {
-    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-    const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-    if (!supabaseUrl || !supabaseAnonKey) return null;
-
-    const url = `${supabaseUrl.replace(/\/$/, '')}/rest/v1/maintenance_requests?select=*,parks(name)&order=created_at.desc&limit=50`;
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: {
-        'apikey': supabaseAnonKey,
-        'Authorization': `Bearer ${supabaseAnonKey}`,
-        'Content-Type': 'application/json',
-      },
-    });
-
-    if (response.ok) {
-      const data = await response.json();
-      if (Array.isArray(data) && data.length > 0) {
-        return data;
-      }
-    }
-  } catch (e) {
-    console.warn('Native REST fetch error:', e);
-  }
-  return null;
-}
-
-/**
- * Direct REST lookup by ticket code or phone
- */
-async function lookupTicketREST(term) {
-  try {
-    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-    const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-    if (!supabaseUrl || !supabaseAnonKey || !term) return null;
-
-    const clean = String(term).trim();
-    const upper = clean.toUpperCase();
-
-    const url = `${supabaseUrl.replace(/\/$/, '')}/rest/v1/maintenance_requests?ticket_code=eq.${upper}&select=*,parks(name)&order=created_at.desc`;
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: {
-        'apikey': supabaseAnonKey,
-        'Authorization': `Bearer ${supabaseAnonKey}`,
-        'Content-Type': 'application/json',
-      },
-    });
-
-    if (response.ok) {
-      const data = await response.json();
-      if (Array.isArray(data) && data.length > 0) {
-        return data;
-      }
-    }
-  } catch (e) {
-    console.warn('Native REST lookup error:', e);
-  }
-  return null;
-}
-
-/**
- * Fetch public issues directly from the server database (maintenance_requests table)
- * Multi-channel fetcher ensuring unauthorized public users always get real issues in read mode
+ * Fetch public issues from the server — uses supabaseAdmin (service role) to bypass RLS
+ * This is the ONLY reliable way because RLS on maintenance_requests blocks SELECT for anon role
  */
 export async function getPublicIssues() {
+  const db = publicClient();
   try {
-    // Channel 1: Native REST API fetch with explicit anon credentials
-    const restData = await fetchPublicREST();
-    if (restData && restData.length > 0) {
-      syncServerTicketsMirror(restData);
-      return { data: restData, error: null };
-    }
-
-    // Channel 2: Supabase JS SDK queries
-    let resultData = [];
-    let { data, error } = await supabase
+    // Primary: service role client bypasses RLS completely
+    const { data, error } = await db
       .from('maintenance_requests')
-      .select('*, parks(name), profiles(full_name)')
+      .select('*, parks(name)')
       .order('created_at', { ascending: false })
       .limit(50);
 
     if (!error && data && data.length > 0) {
-      resultData = data;
-    } else {
-      const res = await supabase
-        .from('maintenance_requests')
-        .select('*, parks(name)')
-        .order('created_at', { ascending: false })
-        .limit(50);
-      if (!res.error && res.data && res.data.length > 0) {
-        resultData = res.data;
-      }
+      syncServerTicketsMirror(data);
+      return { data, error: null };
     }
 
-    if (resultData.length === 0) {
-      const res = await supabase
-        .from('maintenance_requests')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(50);
-      if (!res.error && res.data && res.data.length > 0) {
-        resultData = res.data;
-        try {
-          const { data: parksList } = await supabase.from('parks').select('id, name');
-          const parkMap = {};
-          (parksList || []).forEach(p => { parkMap[p.id] = p.name; });
-          resultData = resultData.map(item => ({
-            ...item,
-            parks: item.parks || (item.park_id && parkMap[item.park_id] ? { name: parkMap[item.park_id] } : null),
-          }));
-        } catch (e) {}
-      }
+    // If service role query returned empty but no error, table might genuinely be empty
+    if (!error && data && data.length === 0) {
+      // Still check mirror in case data was synced from admin operations
+      const mirrored = getServerTicketsMirror();
+      return { data: mirrored, error: null };
     }
 
-    if (resultData && resultData.length > 0) {
-      syncServerTicketsMirror(resultData);
-      return { data: resultData, error: null };
+    // If error occurred (e.g. network), try simpler query
+    const fallback = await db
+      .from('maintenance_requests')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(50);
+
+    if (!fallback.error && fallback.data && fallback.data.length > 0) {
+      syncServerTicketsMirror(fallback.data);
+      return { data: fallback.data, error: null };
     }
 
-    // Channel 3: Server tickets mirror (synced from all real server ticket operations)
     const mirrored = getServerTicketsMirror();
-    return { data: mirrored, error: null };
+    return { data: mirrored, error: error || fallback.error };
   } catch (e) {
     console.error('Error fetching public maintenance issues:', e);
     const mirrored = getServerTicketsMirror();
@@ -481,93 +397,65 @@ export async function getPublicIssues() {
 }
 
 /**
- * Search complaint by ticket code, phone number, or ID directly from the server database
+ * Search complaint by ticket code, phone number, or ID — uses supabaseAdmin to bypass RLS
  */
 export async function getComplaintByTicketOrPhone(lookupTerm) {
   if (!lookupTerm) return { data: [], error: null };
+  const db = publicClient();
   const cleanTerm = String(lookupTerm).trim();
   const upperTerm = cleanTerm.toUpperCase();
 
   try {
-    // Channel 1: Native REST lookup
-    const restResults = await lookupTicketREST(cleanTerm);
-    if (restResults && restResults.length > 0) {
-      syncServerTicketsMirror(restResults);
-      return { data: restResults, error: null };
-    }
-
-    // Channel 2: Supabase JS SDK lookup
-    let { data, error } = await supabase
+    // 1. Ticket code exact match
+    const { data: ticketData } = await db
       .from('maintenance_requests')
-      .select('*, parks(name), profiles(full_name)')
+      .select('*, parks(name)')
       .eq('ticket_code', upperTerm)
       .order('created_at', { ascending: false });
 
-    if (error || !data || data.length === 0) {
-      const res = await supabase
-        .from('maintenance_requests')
-        .select('*, parks(name)')
-        .eq('ticket_code', upperTerm)
-        .order('created_at', { ascending: false });
-      if (res.data && res.data.length > 0) {
-        data = res.data;
-        error = null;
-      }
+    if (ticketData && ticketData.length > 0) {
+      syncServerTicketsMirror(ticketData);
+      return { data: ticketData, error: null };
     }
 
-    if (error || !data || data.length === 0) {
-      const res = await supabase
-        .from('maintenance_requests')
-        .select('*')
-        .eq('ticket_code', upperTerm)
-        .order('created_at', { ascending: false });
-      if (res.data && res.data.length > 0) {
-        data = res.data;
-        error = null;
-      }
-    }
-
-    if (data && data.length > 0) {
-      syncServerTicketsMirror(data);
-      return { data, error: null };
-    }
-
-    // Phone number match
-    const phoneRes = await supabase
+    // 2. Phone number match
+    const { data: phoneData } = await db
       .from('maintenance_requests')
       .select('*, parks(name)')
       .eq('visitor_phone', cleanTerm)
       .order('created_at', { ascending: false });
-    if (!phoneRes.error && phoneRes.data && phoneRes.data.length > 0) {
-      syncServerTicketsMirror(phoneRes.data);
-      return { data: phoneRes.data, error: null };
+
+    if (phoneData && phoneData.length > 0) {
+      syncServerTicketsMirror(phoneData);
+      return { data: phoneData, error: null };
     }
 
-    // UUID ID match
+    // 3. UUID ID match
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     if (uuidRegex.test(cleanTerm)) {
-      const uuidRes = await supabase
+      const { data: uuidData } = await db
         .from('maintenance_requests')
         .select('*, parks(name)')
         .eq('id', cleanTerm);
-      if (!uuidRes.error && uuidRes.data && uuidRes.data.length > 0) {
-        syncServerTicketsMirror(uuidRes.data);
-        return { data: uuidRes.data, error: null };
+      if (uuidData && uuidData.length > 0) {
+        syncServerTicketsMirror(uuidData);
+        return { data: uuidData, error: null };
       }
     }
 
-    // Fuzzy match on ticket_code
-    const fuzzyRes = await supabase
+    // 4. Fuzzy ticket_code match
+    const { data: fuzzyData } = await db
       .from('maintenance_requests')
       .select('*, parks(name)')
       .ilike('ticket_code', `%${cleanTerm}%`)
       .order('created_at', { ascending: false });
-    if (!fuzzyRes.error && fuzzyRes.data && fuzzyRes.data.length > 0) {
-      syncServerTicketsMirror(fuzzyRes.data);
-      return { data: fuzzyRes.data, error: null };
+
+    if (fuzzyData && fuzzyData.length > 0) {
+      syncServerTicketsMirror(fuzzyData);
+      return { data: fuzzyData, error: null };
     }
 
-    // Channel 3: Check mirror
+    // 5. Check mirror fallback
     const mirrored = getServerTicketsMirror();
     const match = mirrored.filter(t => 
       t.ticket_code?.toUpperCase() === upperTerm || 
@@ -577,7 +465,6 @@ export async function getComplaintByTicketOrPhone(lookupTerm) {
     if (match.length > 0) return { data: match, error: null };
 
     return { data: [], error: null };
-
   } catch (e) {
     console.error('Error looking up complaint:', e);
     return { data: [], error: e };

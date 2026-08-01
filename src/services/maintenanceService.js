@@ -263,98 +263,97 @@ export async function updateStatus(id, status, resolutionNote = null, resolvedBy
   return { data, error };
 }
 
-export async function getComplaintByTicketOrPhone(lookupTerm) {
-  if (!lookupTerm) return { data: [], error: null };
-  const cleanTerm = String(lookupTerm).trim();
-
-  // 1. Try ticket_code exact match first
+/**
+ * Helper to execute a query on maintenance_requests with graceful multi-tier fallbacks:
+ * 1. Try full join: parks(name), profiles(full_name)
+ * 2. Try parks-only join: parks(name)
+ * 3. Try plain select: '*' + in-memory park name hydration
+ */
+async function fetchWithFallbacks(applyFiltersFn) {
+  // Tier 1: Full join with parks and profiles
   try {
-    const { data, error } = await supabase
-      .from('maintenance_requests')
-      .select('*, parks(name), profiles(full_name)')
-      .eq('ticket_code', cleanTerm.toUpperCase())
-      .order('created_at', { ascending: false });
-
+    let q = supabase.from('maintenance_requests').select('*, parks(name), profiles(full_name)');
+    q = applyFiltersFn(q);
+    const { data, error } = await q;
     if (!error && data && data.length > 0) {
       return { data, error: null };
     }
   } catch (e) {
-    console.warn('ticket_code lookup failed:', e);
+    console.warn('Tier 1 join failed:', e);
   }
 
-  // 2. Try visitor_phone exact match
+  // Tier 2: Parks-only join (in case profiles RLS blocks anon role)
   try {
-    const { data, error } = await supabase
-      .from('maintenance_requests')
-      .select('*, parks(name), profiles(full_name)')
-      .eq('visitor_phone', cleanTerm)
-      .order('created_at', { ascending: false });
-
+    let q = supabase.from('maintenance_requests').select('*, parks(name)');
+    q = applyFiltersFn(q);
+    const { data, error } = await q;
     if (!error && data && data.length > 0) {
       return { data, error: null };
     }
   } catch (e) {
-    console.warn('visitor_phone lookup failed:', e);
+    console.warn('Tier 2 parks join failed:', e);
   }
 
-  // 3. Try UUID id match only if it looks like a UUID
-  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  if (uuidRegex.test(cleanTerm)) {
-    try {
-      const { data, error } = await supabase
-        .from('maintenance_requests')
-        .select('*, parks(name), profiles(full_name)')
-        .eq('id', cleanTerm);
+  // Tier 3: Direct select with manual park name hydration fallback
+  try {
+    let q = supabase.from('maintenance_requests').select('*');
+    q = applyFiltersFn(q);
+    const { data, error } = await q;
+    if (error) return { data: [], error };
 
-      if (!error && data && data.length > 0) {
+    if (data && data.length > 0) {
+      // Hydrate park names manually from parks table if missing
+      try {
+        const { data: parksList } = await supabase.from('parks').select('id, name');
+        const parkMap = {};
+        (parksList || []).forEach(p => { parkMap[p.id] = p.name; });
+
+        const hydrated = data.map(item => ({
+          ...item,
+          parks: item.parks || (item.park_id && parkMap[item.park_id] ? { name: parkMap[item.park_id] } : null),
+        }));
+        return { data: hydrated, error: null };
+      } catch (e) {
         return { data, error: null };
       }
-    } catch (e) {
-      console.warn('UUID id lookup failed:', e);
     }
-  }
 
-  // 4. Fuzzy ilike fallback on ticket_code
-  try {
-    const { data, error } = await supabase
-      .from('maintenance_requests')
-      .select('*, parks(name), profiles(full_name)')
-      .ilike('ticket_code', `%${cleanTerm}%`)
-      .order('created_at', { ascending: false });
-
-    return { data: data || [], error };
-  } catch (e) {
-    // ticket_code column may not exist yet
-    console.warn('ilike fallback failed:', e);
-  }
-
-  // 5. Final fallback — search description
-  try {
-    const { data, error } = await supabase
-      .from('maintenance_requests')
-      .select('*, parks(name), profiles(full_name)')
-      .ilike('description', `%${cleanTerm}%`)
-      .order('created_at', { ascending: false })
-      .limit(10);
-
-    return { data: data || [], error };
+    return { data: data || [], error: null };
   } catch (e) {
     return { data: [], error: e };
   }
 }
 
-export async function getPublicIssues() {
-  try {
-    const { data, error } = await supabase
-      .from('maintenance_requests')
-      .select('*, parks(name), profiles(full_name)')
-      .order('created_at', { ascending: false })
-      .limit(50);
+export async function getComplaintByTicketOrPhone(lookupTerm) {
+  if (!lookupTerm) return { data: [], error: null };
+  const cleanTerm = String(lookupTerm).trim();
+  const upperTerm = cleanTerm.toUpperCase();
 
-    return { data: data || [], error };
-  } catch (e) {
-    return { data: [], error: e };
+  // 1. Try ticket_code exact match first
+  let res = await fetchWithFallbacks(q => q.eq('ticket_code', upperTerm).order('created_at', { ascending: false }));
+  if (res.data && res.data.length > 0) return res;
+
+  // 2. Try visitor_phone exact match
+  res = await fetchWithFallbacks(q => q.eq('visitor_phone', cleanTerm).order('created_at', { ascending: false }));
+  if (res.data && res.data.length > 0) return res;
+
+  // 3. Try UUID id match if it looks like a valid UUID
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (uuidRegex.test(cleanTerm)) {
+    res = await fetchWithFallbacks(q => q.eq('id', cleanTerm));
+    if (res.data && res.data.length > 0) return res;
   }
+
+  // 4. Fuzzy ilike fallback on ticket_code
+  res = await fetchWithFallbacks(q => q.ilike('ticket_code', `%${cleanTerm}%`).order('created_at', { ascending: false }));
+  if (res.data && res.data.length > 0) return res;
+
+  // 5. Final fallback — search description
+  return fetchWithFallbacks(q => q.ilike('description', `%${cleanTerm}%`).order('created_at', { ascending: false }).limit(10));
+}
+
+export async function getPublicIssues() {
+  return fetchWithFallbacks(q => q.order('created_at', { ascending: false }).limit(50));
 }
 
 export async function deleteComplaint(id) {

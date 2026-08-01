@@ -38,12 +38,13 @@ ALTER TABLE profiles             ENABLE ROW LEVEL SECURITY;
 -- 2. PARKS POLICIES
 -- ---------------------------------------------------------------------------
 
--- Anonymous visitors can read active parks only
+-- Anonymous visitors can read parks for public issue board & checkin
 DROP POLICY IF EXISTS "anon_read_active_parks" ON parks;
-CREATE POLICY "anon_read_active_parks"
+DROP POLICY IF EXISTS "anon_read_parks" ON parks;
+CREATE POLICY "anon_read_parks"
   ON parks FOR SELECT
   TO anon
-  USING (status = 'active');
+  USING (true);
 
 -- Authenticated users (all roles) can read all parks
 DROP POLICY IF EXISTS "auth_read_all_parks" ON parks;
@@ -224,7 +225,12 @@ CREATE POLICY "super_admin_delete_profiles"
   TO authenticated
   USING (current_user_role() = 'SUPER_ADMIN');
 
--- NOTE: No access for anon on profiles
+-- Anonymous visitors can read officer names for public issue board / ticket tracking
+DROP POLICY IF EXISTS "anon_read_profiles" ON profiles;
+CREATE POLICY "anon_read_profiles"
+  ON profiles FOR SELECT
+  TO anon
+  USING (true);
 
 -- ---------------------------------------------------------------------------
 -- 7. STORAGE BUCKET & POLICIES

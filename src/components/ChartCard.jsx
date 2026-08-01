@@ -30,15 +30,19 @@ export default function ChartCard({ title, subtitle, children, className = '' })
 }
 
 export function VisitorLineChart({ data = [], height = 280 }) {
+  const chartData = Array.isArray(data) ? data : [];
+
   return (
     <ResponsiveContainer width="100%" height={height}>
-      <LineChart data={data} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+      <LineChart data={chartData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
         <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
         <XAxis
           dataKey="date"
           tick={{ fontSize: 11, fill: '#94A3B8' }}
           tickFormatter={(val) => {
+            if (!val) return '';
             const d = new Date(val);
+            if (isNaN(d.getTime())) return String(val);
             return `${d.getDate()}/${d.getMonth() + 1}`;
           }}
         />
@@ -65,9 +69,11 @@ export function VisitorLineChart({ data = [], height = 280 }) {
 }
 
 export function FeedbackBarChart({ data = [], height = 280 }) {
+  const chartData = Array.isArray(data) ? data : [];
+
   return (
     <ResponsiveContainer width="100%" height={height}>
-      <BarChart data={data} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+      <BarChart data={chartData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
         <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
         <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#94A3B8' }} />
         <YAxis tick={{ fontSize: 11, fill: '#94A3B8' }} domain={[0, 5]} />
@@ -86,21 +92,23 @@ export function FeedbackBarChart({ data = [], height = 280 }) {
 }
 
 export function StatusPieChart({ data = [], height = 280 }) {
+  const chartData = Array.isArray(data) ? data : [];
+
   return (
     <ResponsiveContainer width="100%" height={height}>
       <PieChart>
         <Pie
-          data={data}
+          data={chartData}
           cx="50%"
           cy="50%"
           innerRadius={50}
           outerRadius={90}
           paddingAngle={4}
           dataKey="value"
-          label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+          label={({ name, percent }) => `${name || ''} ${typeof percent === 'number' && !isNaN(percent) ? (percent * 100).toFixed(0) : 0}%`}
           labelLine={false}
         >
-          {data.map((entry, index) => (
+          {chartData.map((entry, index) => (
             <Cell key={`cell-${index}`} fill={entry.color || CHART_COLORS[index % CHART_COLORS.length]} />
           ))}
         </Pie>

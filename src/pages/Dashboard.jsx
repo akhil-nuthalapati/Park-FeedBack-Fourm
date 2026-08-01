@@ -11,7 +11,7 @@ import Breadcrumb from '../components/Breadcrumb';
 import { Users, Star, Wrench, AlertTriangle, Calendar } from 'lucide-react';
 
 export default function Dashboard() {
-  const { profile, isOfficer, isAdmin } = useAuth();
+  const { profile } = useAuth();
   const [loading, setLoading] = useState(true);
   const [parks, setParks] = useState([]);
   const [selectedParkId, setSelectedParkId] = useState('');
@@ -30,8 +30,12 @@ export default function Dashboard() {
 
   useEffect(() => {
     async function init() {
-      const { data } = await getAllParks();
-      if (data) setParks(data);
+      try {
+        const { data } = await getAllParks();
+        if (data) setParks(data);
+      } catch (e) {
+        console.warn('Parks fetch error on dashboard:', e);
+      }
       await loadDashboardData('');
     }
     init();
@@ -48,38 +52,39 @@ export default function Dashboard() {
         complaintsRes,
         trendRes
       ] = await Promise.all([
-        getVisitCount(parkId || null, 'today'),
-        getVisitCount(parkId || null, 'week'),
-        getAverageRatings(parkId || null),
-        getComplaints({ parkId: parkId || undefined, limit: 100 }), // Get more for the pie chart
-        getDailyVisitors(parkId || null, 14) // Last 14 days
+        getVisitCount(parkId || null, 'today').catch(() => ({ data: 0 })),
+        getVisitCount(parkId || null, 'week').catch(() => ({ data: 0 })),
+        getAverageRatings(parkId || null).catch(() => ({ data: { overall_rating: 0 } })),
+        getComplaints({ parkId: parkId || undefined, limit: 100 }).catch(() => ({ data: [] })),
+        getDailyVisitors(parkId || null, 14).catch(() => ({ data: [] }))
       ]);
 
-      const complaintsData = complaintsRes.data || [];
-      const pendingCount = complaintsData.filter(c => c.status === 'open' || c.status === 'in_progress').length;
+      const complaintsData = Array.isArray(complaintsRes?.data) ? complaintsRes.data : [];
+      const pendingCount = complaintsData.filter(c => c && (c.status === 'open' || c.status === 'in_progress')).length;
 
       setStats({
-        todayVisitors: todayVisitsRes.data || 0,
-        weeklyVisitors: weekVisitsRes.data || 0,
-        avgRating: ratingRes.data?.overall_rating || 0,
+        todayVisitors: todayVisitsRes?.data || 0,
+        weeklyVisitors: weekVisitsRes?.data || 0,
+        avgRating: ratingRes?.data?.overall_rating || 0,
         pendingIssues: pendingCount,
       });
 
-      setVisitorTrend(trendRes.data || []);
+      setVisitorTrend(Array.isArray(trendRes?.data) ? trendRes.data : []);
 
       // Calculate maintenance status distribution
       const statusCounts = { open: 0, in_progress: 0, resolved: 0, rejected: 0 };
       complaintsData.forEach(c => {
-        if (statusCounts[c.status] !== undefined) statusCounts[c.status]++;
+        if (c?.status && statusCounts[c.status] !== undefined) {
+          statusCounts[c.status]++;
+        }
       });
 
       setMaintenanceStatus([
         { name: 'Open', value: statusCounts.open, color: '#0DCAF0' },
         { name: 'In Progress', value: statusCounts.in_progress, color: '#FFC107' },
         { name: 'Resolved', value: statusCounts.resolved, color: '#198754' },
-      ].filter(item => item.value > 0)); // Only show non-zero statuses
+      ].filter(item => item.value > 0));
 
-      // Get 5 most recent activities (just using complaints for now)
       setRecentActivity(complaintsData.slice(0, 5));
 
     } catch (error) {
@@ -101,7 +106,9 @@ export default function Dashboard() {
       
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
         <div>
-          <h1 className="text-2xl font-bold text-gray-800">Welcome, {profile?.full_name}</h1>
+          <h1 className="text-2xl font-bold text-gray-800">
+            Welcome, {profile?.full_name || 'Admin User'}
+          </h1>
           <p className="text-sm text-gray-500">Here is what's happening across your parks today.</p>
         </div>
         
@@ -179,7 +186,7 @@ export default function Dashboard() {
               <table className="gov-table min-w-full">
                 <thead>
                   <tr>
-                    <th>ID</th>
+                    <th>Ticket / ID</th>
                     <th>Issue Type</th>
                     <th>Park</th>
                     <th>Status</th>
@@ -188,35 +195,41 @@ export default function Dashboard() {
                 </thead>
                 <tbody>
                   {recentActivity.length > 0 ? (
-                    recentActivity.map((req) => (
-                      <tr key={req.id}>
-                        <td className="font-mono text-xs text-gray-500">
-                          {req.id.substring(0, 8)}...
-                        </td>
-                        <td className="capitalize">{req.issue_type}</td>
-                        <td>{req.parks?.name || 'Unknown'}</td>
-                        <td>
-                          <span className={`badge ${
-                            req.status === 'open' ? 'bg-blue-100 text-blue-800' :
-                            req.status === 'in_progress' ? 'bg-yellow-100 text-yellow-800' :
-                            req.status === 'resolved' ? 'bg-green-100 text-green-800' :
-                            'bg-red-100 text-red-800'
-                          }`}>
-                            {req.status.replace('_', ' ').toUpperCase()}
-                          </span>
-                        </td>
-                        <td>
-                          <span className={`badge ${
-                            req.priority === 'critical' ? 'bg-red-100 text-red-800' :
-                            req.priority === 'high' ? 'bg-orange-100 text-orange-800' :
-                            req.priority === 'medium' ? 'bg-yellow-100 text-yellow-800' :
-                            'bg-green-100 text-green-800'
-                          }`}>
-                            {req.priority.toUpperCase()}
-                          </span>
-                        </td>
-                      </tr>
-                    ))
+                    recentActivity.map((req) => {
+                      const displayId = req.ticket_code || (req.id ? `#${req.id.substring(0, 6)}` : 'N/A');
+                      const statusStr = (req.status || 'open').replace('_', ' ').toUpperCase();
+                      const priorityStr = (req.priority || 'medium').toUpperCase();
+
+                      return (
+                        <tr key={req.id || Math.random()}>
+                          <td className="font-mono text-xs font-bold text-primary">
+                            {displayId}
+                          </td>
+                          <td className="capitalize">{req.issue_type || 'General'}</td>
+                          <td>{req.parks?.name || 'Visakhapatnam Park'}</td>
+                          <td>
+                            <span className={`badge ${
+                              req.status === 'open' ? 'bg-blue-100 text-blue-800' :
+                              req.status === 'in_progress' ? 'bg-yellow-100 text-yellow-800' :
+                              req.status === 'resolved' ? 'bg-green-100 text-green-800' :
+                              'bg-red-100 text-red-800'
+                            }`}>
+                              {statusStr}
+                            </span>
+                          </td>
+                          <td>
+                            <span className={`badge ${
+                              req.priority === 'critical' ? 'bg-red-100 text-red-800' :
+                              req.priority === 'high' ? 'bg-orange-100 text-orange-800' :
+                              req.priority === 'medium' ? 'bg-yellow-100 text-yellow-800' :
+                              'bg-green-100 text-green-800'
+                            }`}>
+                              {priorityStr}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })
                   ) : (
                     <tr>
                       <td colSpan="5" className="text-center py-8 text-gray-500">

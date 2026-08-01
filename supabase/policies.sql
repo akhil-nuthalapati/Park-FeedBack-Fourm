@@ -182,7 +182,12 @@ CREATE POLICY "admin_delete_maintenance"
   TO authenticated
   USING (current_user_role() IN ('ADMIN', 'SUPER_ADMIN'));
 
--- NOTE: No SELECT policy for anon on maintenance_requests
+-- Anonymous visitors can read maintenance requests (for public issue board & ticket tracking)
+DROP POLICY IF EXISTS "anon_read_maintenance" ON maintenance_requests;
+CREATE POLICY "anon_read_maintenance"
+  ON maintenance_requests FOR SELECT
+  TO anon
+  USING (true);
 
 -- ---------------------------------------------------------------------------
 -- 6. PROFILES POLICIES

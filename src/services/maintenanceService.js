@@ -150,6 +150,11 @@ export async function uploadComplaintPhoto(file) {
   }
 
   // Fail-Safe Fallback: Convert image file to base64 Data URL so submission NEVER fails
+  return readFileAsBase64(file);
+}
+
+export function readFileAsBase64(file) {
+  if (!file) return Promise.resolve({ data: null, error: null });
   return new Promise((resolve) => {
     const reader = new FileReader();
     reader.onloadend = () => {
@@ -206,13 +211,16 @@ export async function assignComplaint(id, employeeId) {
   return { data, error };
 }
 
-export async function updateStatus(id, status, resolutionNote = null, resolvedBy = null) {
+export async function updateStatus(id, status, resolutionNote = null, resolvedBy = null, resolutionImageUrl = null) {
   const updateFields = { status };
   if (resolutionNote !== null) {
     updateFields.resolution_note = resolutionNote;
   }
   if (resolvedBy) {
     updateFields.resolved_by = resolvedBy;
+  }
+  if (resolutionImageUrl) {
+    updateFields.resolution_image_url = resolutionImageUrl;
   }
   if (status === 'resolved') {
     updateFields.resolved_at = new Date().toISOString();
@@ -225,10 +233,11 @@ export async function updateStatus(id, status, resolutionNote = null, resolvedBy
     .select()
     .single();
 
-  // Fallback if resolution_note column not present in DB
-  if (error && (error.message?.includes('resolution_note') || error.code === '42703')) {
+  // Fallback if resolution_note/resolution_image_url column not present in DB
+  if (error && (error.message?.includes('resolution_note') || error.message?.includes('resolution_image_url') || error.code === '42703')) {
     delete updateFields.resolution_note;
     delete updateFields.resolved_by;
+    delete updateFields.resolution_image_url;
     const retryRes = await supabase
       .from('maintenance_requests')
       .update(updateFields)
@@ -258,28 +267,89 @@ export async function getComplaintByTicketOrPhone(lookupTerm) {
   if (!lookupTerm) return { data: [], error: null };
   const cleanTerm = String(lookupTerm).trim();
 
+  // 1. Try ticket_code exact match first
   try {
-    // 1. Search by exact ticket_code or phone or id
     const { data, error } = await supabase
       .from('maintenance_requests')
       .select('*, parks(name), profiles(full_name)')
-      .or(`ticket_code.eq.${cleanTerm.toUpperCase()},visitor_phone.eq.${cleanTerm},id.eq.${cleanTerm}`)
+      .eq('ticket_code', cleanTerm.toUpperCase())
       .order('created_at', { ascending: false });
 
     if (!error && data && data.length > 0) {
       return { data, error: null };
     }
   } catch (e) {
-    console.warn('DB lookup failed, trying fallback search:', e);
+    console.warn('ticket_code lookup failed:', e);
   }
 
-  // Fallback search with ilike
+  // 2. Try visitor_phone exact match
+  try {
+    const { data, error } = await supabase
+      .from('maintenance_requests')
+      .select('*, parks(name), profiles(full_name)')
+      .eq('visitor_phone', cleanTerm)
+      .order('created_at', { ascending: false });
+
+    if (!error && data && data.length > 0) {
+      return { data, error: null };
+    }
+  } catch (e) {
+    console.warn('visitor_phone lookup failed:', e);
+  }
+
+  // 3. Try UUID id match only if it looks like a UUID
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (uuidRegex.test(cleanTerm)) {
+    try {
+      const { data, error } = await supabase
+        .from('maintenance_requests')
+        .select('*, parks(name), profiles(full_name)')
+        .eq('id', cleanTerm);
+
+      if (!error && data && data.length > 0) {
+        return { data, error: null };
+      }
+    } catch (e) {
+      console.warn('UUID id lookup failed:', e);
+    }
+  }
+
+  // 4. Fuzzy ilike fallback on ticket_code
   try {
     const { data, error } = await supabase
       .from('maintenance_requests')
       .select('*, parks(name), profiles(full_name)')
       .ilike('ticket_code', `%${cleanTerm}%`)
       .order('created_at', { ascending: false });
+
+    return { data: data || [], error };
+  } catch (e) {
+    // ticket_code column may not exist yet
+    console.warn('ilike fallback failed:', e);
+  }
+
+  // 5. Final fallback — search description
+  try {
+    const { data, error } = await supabase
+      .from('maintenance_requests')
+      .select('*, parks(name), profiles(full_name)')
+      .ilike('description', `%${cleanTerm}%`)
+      .order('created_at', { ascending: false })
+      .limit(10);
+
+    return { data: data || [], error };
+  } catch (e) {
+    return { data: [], error: e };
+  }
+}
+
+export async function getPublicIssues() {
+  try {
+    const { data, error } = await supabase
+      .from('maintenance_requests')
+      .select('*, parks(name), profiles(full_name)')
+      .order('created_at', { ascending: false })
+      .limit(50);
 
     return { data: data || [], error };
   } catch (e) {

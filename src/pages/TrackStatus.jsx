@@ -271,6 +271,17 @@ export default function TrackStatus() {
                     <p className="text-sm font-medium text-emerald-900 leading-relaxed pl-6">
                       "{ticket.resolution_note}"
                     </p>
+                    {ticket.resolution_image_url && (
+                      <div className="mt-3 pl-6">
+                        <p className="text-xs font-bold text-emerald-800 uppercase mb-1">Resolution Proof Photo:</p>
+                        <img
+                          src={ticket.resolution_image_url}
+                          alt="Resolution Proof"
+                          className="h-40 w-auto rounded-lg border border-emerald-300 object-cover shadow-sm"
+                          onError={(e) => { e.target.style.display = 'none'; }}
+                        />
+                      </div>
+                    )}
                     {ticket.resolved_at && (
                       <p className="text-xs text-emerald-700 mt-2 pl-6 font-semibold">
                         Resolved on {new Date(ticket.resolved_at).toLocaleString('en-IN')}

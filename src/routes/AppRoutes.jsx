@@ -10,6 +10,7 @@ import CheckIn from '../pages/CheckIn';
 import Feedback from '../pages/Feedback';
 import Maintenance from '../pages/Maintenance';
 import TrackStatus from '../pages/TrackStatus';
+import Reviews from '../pages/Reviews';
 import ThankYou from '../pages/ThankYou';
 import Login from '../pages/Login';
 import NotFound from '../pages/NotFound';
@@ -35,6 +36,7 @@ export default function AppRoutes() {
           <Route path="/feedback" element={<Feedback />} />
           <Route path="/maintenance" element={<Maintenance />} />
           <Route path="/track-status" element={<TrackStatus />} />
+          <Route path="/reviews" element={<Reviews />} />
           <Route path="/thank-you" element={<ThankYou />} />
           <Route path="/login" element={<Login />} />
         </Route>

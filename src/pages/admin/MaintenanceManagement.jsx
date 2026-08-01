@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { getComplaints, updateStatus, assignComplaint } from '../../services/maintenanceService';
+import { getComplaints, updateStatus, assignComplaint, readFileAsBase64 } from '../../services/maintenanceService';
 import { getActiveOfficers } from '../../services/employeeService';
 import { getAllParks } from '../../services/parkService';
 import { formatDate, getPriorityColor, getStatusColor, formatStatus } from '../../utils/helpers';
@@ -18,7 +18,7 @@ export default function MaintenanceManagement() {
   
   // Modals state
   const [imageModal, setImageModal] = useState({ open: false, url: '' });
-  const [actionModal, setActionModal] = useState({ open: false, type: '', request: null, newValue: '', resolutionNote: '' });
+  const [actionModal, setActionModal] = useState({ open: false, type: '', request: null, newValue: '', resolutionNote: '', resolutionImage: null, resolutionImagePreview: '' });
   
   // Filters
   const [filters, setFilters] = useState({
@@ -64,6 +64,21 @@ export default function MaintenanceManagement() {
     setFilters(prev => ({ ...prev, [name]: value }));
   };
 
+  const handleResolutionImageChange = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('Image must be under 5MB');
+      return;
+    }
+    const { data } = await readFileAsBase64(file);
+    setActionModal(prev => ({
+      ...prev,
+      resolutionImage: file,
+      resolutionImagePreview: data || URL.createObjectURL(file),
+    }));
+  };
+
   const openAction = (type, request, newValue) => {
     setActionModal({
       open: true,
@@ -71,6 +86,8 @@ export default function MaintenanceManagement() {
       request,
       newValue,
       resolutionNote: request?.resolution_note || '',
+      resolutionImage: null,
+      resolutionImagePreview: request?.resolution_image_url || '',
     });
   };
 
@@ -89,7 +106,8 @@ export default function MaintenanceManagement() {
           toast.error('Please select a valid status.');
           return;
         }
-        const res = await updateStatus(request.id, newValue, resolutionNote);
+        const imageUrl = actionModal.resolutionImagePreview || null;
+        const res = await updateStatus(request.id, newValue, resolutionNote, null, imageUrl);
         error = res.error;
       } else if (type === 'assign') {
         const res = await assignComplaint(request.id, newValue);
@@ -99,7 +117,7 @@ export default function MaintenanceManagement() {
       if (error) throw error;
       
       toast.success(`Successfully updated ${type}.`);
-      setActionModal({ open: false, type: '', request: null, newValue: '', resolutionNote: '' });
+      setActionModal({ open: false, type: '', request: null, newValue: '', resolutionNote: '', resolutionImage: null, resolutionImagePreview: '' });
       loadRequests(); // Reload data
     } catch (err) {
       console.error(err);
@@ -401,6 +419,7 @@ export default function MaintenanceManagement() {
               <button
                 onClick={() => setActionModal({ open: false, type: '', request: null, newValue: '', resolutionNote: '' })}
                 className="text-gray-400 hover:text-gray-600"
+                title="Close"
               >
                 <X size={20} />
               </button>
@@ -414,21 +433,53 @@ export default function MaintenanceManagement() {
 
               {/* Resolution Note Field */}
               {actionModal.type === 'status' && (
-                <div className="gov-form-group">
-                  <label className="gov-label font-semibold text-xs text-gray-700 flex items-center gap-1.5">
-                    <MessageSquare size={14} className="text-emerald-600" />
-                    Staff Resolution Note / Response (Visible to Visitor)
-                  </label>
-                  <textarea
-                    value={actionModal.resolutionNote}
-                    onChange={(e) => setActionModal(prev => ({ ...prev, resolutionNote: e.target.value }))}
-                    placeholder="e.g. Broken bench repaired with reinforced hardwood seating by Ward 12 Team on Aug 1st."
-                    rows={3}
-                    className="gov-textarea text-xs"
-                  />
-                  <p className="text-[11px] text-gray-400 mt-1">
-                    This message will be shown on the public visitor status tracking portal.
-                  </p>
+                <div className="space-y-3">
+                  <div className="gov-form-group">
+                    <label className="gov-label font-semibold text-xs text-gray-700 flex items-center gap-1.5">
+                      <MessageSquare size={14} className="text-emerald-600" />
+                      Staff Resolution Note / Response (Visible to Visitor)
+                    </label>
+                    <textarea
+                      value={actionModal.resolutionNote}
+                      onChange={(e) => setActionModal(prev => ({ ...prev, resolutionNote: e.target.value }))}
+                      placeholder="e.g. Broken bench repaired with reinforced hardwood seating by Ward 12 Team on Aug 1st."
+                      rows={3}
+                      className="gov-textarea text-xs"
+                    />
+                    <p className="text-[11px] text-gray-400 mt-1">
+                      This message will be shown on the public visitor status tracking portal.
+                    </p>
+                  </div>
+
+                  <div className="gov-form-group">
+                    <label className="gov-label font-semibold text-xs text-gray-700 flex items-center gap-1.5">
+                      <ImageIcon size={14} className="text-blue-600" />
+                      Resolution Proof Photo (Optional)
+                    </label>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={handleResolutionImageChange}
+                      className="text-xs text-slate-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+                    />
+                    {actionModal.resolutionImagePreview && (
+                      <div className="mt-2 relative inline-block">
+                        <img
+                          src={actionModal.resolutionImagePreview}
+                          alt="Resolution Proof Preview"
+                          className="h-24 w-auto rounded-lg border border-gray-200 object-cover shadow-sm"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setActionModal(prev => ({ ...prev, resolutionImage: null, resolutionImagePreview: '' }))}
+                          className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-0.5 shadow hover:bg-red-600"
+                          title="Remove image"
+                        >
+                          <X size={12} />
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
             </div>

@@ -1,84 +1,6 @@
 import { supabase } from './supabase';
 import { createNotificationsForAllProfiles } from './notificationService';
 
-const PUBLIC_COMPLAINTS_CACHE_KEY = 'gvmc_public_complaints_cache';
-
-// Seed sample issues so unauthenticated visitors ALWAYS have initial transparent public board data
-const DEFAULT_PUBLIC_ISSUES = [
-  {
-    id: 'public-seed-1',
-    ticket_code: 'MR-V82A1',
-    park_id: '1',
-    issue_type: 'equipment',
-    description: 'Children playground swing chain broken and unsafe for kids.',
-    priority: 'high',
-    status: 'resolved',
-    photo_url: 'https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?w=800&q=80',
-    visitor_phone: '9876543210',
-    resolution_note: 'Swing chain replaced with heavy-duty galvanized steel links by Ward 14 maintenance team.',
-    resolution_image_url: 'https://images.unsplash.com/photo-1584467735871-8e85353a8413?w=800&q=80',
-    created_at: new Date(Date.now() - 36 * 60 * 60 * 1000).toISOString(),
-    resolved_at: new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString(),
-    parks: { name: 'VUDA City Park' },
-    profiles: { full_name: 'Officer Rajesh Kumar' }
-  },
-  {
-    id: 'public-seed-2',
-    ticket_code: 'MR-K49L2',
-    park_id: '2',
-    issue_type: 'lighting',
-    description: 'High mast LED streetlight flickering near walking track section B.',
-    priority: 'medium',
-    status: 'in_progress',
-    photo_url: null,
-    visitor_phone: '9123456789',
-    resolution_note: null,
-    created_at: new Date(Date.now() - 18 * 60 * 60 * 1000).toISOString(),
-    parks: { name: 'Kailasagiri Hill Park' },
-    profiles: { full_name: 'Officer P. Srinivas' }
-  },
-  {
-    id: 'public-seed-3',
-    ticket_code: 'MR-B91M4',
-    park_id: '3',
-    issue_type: 'hygiene',
-    description: 'Dustbin full near central fountain, cleaning required.',
-    priority: 'low',
-    status: 'resolved',
-    photo_url: null,
-    visitor_phone: '9888777666',
-    resolution_note: 'Garbage cleared and new bin installed.',
-    created_at: new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString(),
-    resolved_at: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
-    parks: { name: 'Beach Road Children Park' },
-    profiles: { full_name: 'Officer K. Lakshmi' }
-  }
-];
-
-export function getCachedComplaints() {
-  try {
-    const raw = localStorage.getItem(PUBLIC_COMPLAINTS_CACHE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-    }
-  } catch (e) {}
-  return DEFAULT_PUBLIC_ISSUES;
-}
-
-export function saveCachedComplaint(complaint) {
-  try {
-    const current = getCachedComplaints();
-    const existingIdx = current.findIndex(c => c.id === complaint.id || (c.ticket_code && c.ticket_code === complaint.ticket_code));
-    if (existingIdx >= 0) {
-      current[existingIdx] = { ...current[existingIdx], ...complaint };
-    } else {
-      current.unshift(complaint);
-    }
-    localStorage.setItem(PUBLIC_COMPLAINTS_CACHE_KEY, JSON.stringify(current.slice(0, 50)));
-  } catch (e) {}
-}
-
 // Helper to generate readable short ticket lookup code (e.g., MR-83920)
 export function generateTicketCode() {
   const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
@@ -136,7 +58,6 @@ export async function submitComplaint(payload) {
       .gte('created_at', fortyEightHoursAgo);
 
     if (recentReports && recentReports.length >= 2) {
-      // 3+ reports total (including current one)
       isRecurring = true;
       recentCount = recentReports.length + 1;
       priority = 'high'; // Auto-escalate priority to high
@@ -165,27 +86,12 @@ export async function submitComplaint(payload) {
     parkName = payload.park_name;
   }
 
-  // Always cache for public visibility fallback
-  saveCachedComplaint({
-    id: `local-${Date.now()}`,
-    ticket_code: ticketCode,
-    park_id: payload.park_id,
-    issue_type: enumType,
-    description: fullDescription,
-    priority,
-    status: 'open',
-    photo_url: payload.photo_url || null,
-    visitor_phone: payload.visitor_phone || null,
-    created_at: new Date().toISOString(),
-    parks: { name: parkName }
-  });
-
-  // 2. Insert into maintenance_requests (no .select() to comply with anon RLS)
+  // 2. Insert into maintenance_requests on server
   let { data, error } = await supabase
     .from('maintenance_requests')
     .insert([finalPayload]);
 
-  // Fallback if ticket_code column isn't in DB yet
+  // Fallback if ticket_code column isn't in DB schema yet
   if (error && (error.message?.includes('ticket_code') || error.code === '42703')) {
     delete finalPayload.ticket_code;
     delete finalPayload.visitor_phone;
@@ -261,7 +167,7 @@ export function readFileAsBase64(file) {
 }
 
 export async function getComplaints(filters = {}) {
-  const { page = 1, limit = 20, status, priority, issueType, parkId, sortBy = 'created_at', ascending = false } = filters;
+  const { page = 1, limit = 50, status, priority, issueType, parkId, sortBy = 'created_at', ascending = false } = filters;
   const from = (page - 1) * limit;
   const to = from + limit - 1;
 
@@ -277,13 +183,23 @@ export async function getComplaints(filters = {}) {
   query = query.range(from, to);
 
   const { data, error, count } = await query;
-  if (!error && data && data.length > 0) {
-    return { data, error, count };
+  if (!error && data) {
+    return { data, error: null, count };
   }
 
-  // Fallback to cache if DB returns empty or error
-  const cached = getCachedComplaints();
-  return { data: cached, error: null, count: cached.length };
+  // Fallback if profiles join fails due to RLS
+  let altQuery = supabase
+    .from('maintenance_requests')
+    .select('*, parks(name)', { count: 'exact' })
+    .order(sortBy, { ascending });
+  if (status) altQuery = altQuery.eq('status', status);
+  if (priority) altQuery = altQuery.eq('priority', priority);
+  if (issueType) altQuery = altQuery.eq('issue_type', issueType);
+  if (parkId) altQuery = altQuery.eq('park_id', parkId);
+  altQuery = altQuery.range(from, to);
+
+  const altRes = await altQuery;
+  return { data: altRes.data || [], error: altRes.error, count: altRes.count || 0 };
 }
 
 export async function assignComplaint(id, employeeId) {
@@ -299,7 +215,6 @@ export async function assignComplaint(id, employeeId) {
     .single();
 
   if (!error && data) {
-    saveCachedComplaint(data);
     createNotificationsForAllProfiles({
       title: `👤 Staff Assigned to Request`,
       message: `Maintenance Ticket ${data.ticket_code || id} assigned to officer.`,
@@ -326,15 +241,6 @@ export async function updateStatus(id, status, resolutionNote = null, resolvedBy
     updateFields.resolved_at = new Date().toISOString();
   }
 
-  // Sync to local cache so unauthenticated public visitors see real-time status updates instantly
-  saveCachedComplaint({
-    id,
-    status,
-    resolution_note: resolutionNote,
-    resolution_image_url: resolutionImageUrl,
-    resolved_at: status === 'resolved' ? new Date().toISOString() : null,
-  });
-
   let { data, error } = await supabase
     .from('maintenance_requests')
     .update(updateFields)
@@ -342,7 +248,7 @@ export async function updateStatus(id, status, resolutionNote = null, resolvedBy
     .select()
     .single();
 
-  // Fallback if resolution_note/resolution_image_url column not present in DB
+  // Fallback if resolution_note/resolution_image_url column not present in DB schema
   if (error && (error.message?.includes('resolution_note') || error.message?.includes('resolution_image_url') || error.code === '42703')) {
     delete updateFields.resolution_note;
     delete updateFields.resolved_by;
@@ -358,7 +264,6 @@ export async function updateStatus(id, status, resolutionNote = null, resolvedBy
   }
 
   if (!error) {
-    if (data) saveCachedComplaint(data);
     const isResolved = status === 'resolved';
     createNotificationsForAllProfiles({
       title: isResolved ? `✅ Maintenance Request Resolved` : `🔄 Request Status Updated: ${status.toUpperCase()}`,
@@ -374,129 +279,146 @@ export async function updateStatus(id, status, resolutionNote = null, resolvedBy
 }
 
 /**
- * Helper to execute a query on maintenance_requests with graceful multi-tier fallbacks:
- * 1. Try full join: parks(name), profiles(full_name)
- * 2. Try parks-only join: parks(name)
- * 3. Try plain select: '*' + in-memory park name hydration
- * 4. Merge with local cache & seed data so unauthenticated visitors ALWAYS see tickets
+ * Fetch public issues directly from the server database (maintenance_requests table)
+ * Handles multi-tier query fallbacks to ensure unauthenticated public users get real data
  */
-async function fetchWithFallbacks(applyFiltersFn) {
-  let result = [];
-
-  // Tier 1: Full join with parks and profiles
+export async function getPublicIssues() {
   try {
-    let q = supabase.from('maintenance_requests').select('*, parks(name), profiles(full_name)');
-    q = applyFiltersFn(q);
-    const { data, error } = await q;
-    if (!error && data && data.length > 0) {
-      result = data;
-    }
-  } catch (e) {
-    console.warn('Tier 1 join failed:', e);
-  }
+    // Tier 1: Query server with full joins
+    let { data, error } = await supabase
+      .from('maintenance_requests')
+      .select('*, parks(name), profiles(full_name)')
+      .order('created_at', { ascending: false })
+      .limit(50);
 
-  // Tier 2: Parks-only join
-  if (result.length === 0) {
-    try {
-      let q = supabase.from('maintenance_requests').select('*, parks(name)');
-      q = applyFiltersFn(q);
-      const { data, error } = await q;
-      if (!error && data && data.length > 0) {
-        result = data;
-      }
-    } catch (e) {
-      console.warn('Tier 2 parks join failed:', e);
+    // Tier 2: Query server with parks join (if profiles RLS blocks unauthenticated role)
+    if (error || !data) {
+      const res = await supabase
+        .from('maintenance_requests')
+        .select('*, parks(name)')
+        .order('created_at', { ascending: false })
+        .limit(50);
+      data = res.data;
+      error = res.error;
     }
-  }
 
-  // Tier 3: Direct select with manual park hydration
-  if (result.length === 0) {
-    try {
-      let q = supabase.from('maintenance_requests').select('*');
-      q = applyFiltersFn(q);
-      const { data, error } = await q;
-      if (!error && data && data.length > 0) {
+    // Tier 3: Direct query on maintenance_requests with manual park name hydration
+    if (error || !data) {
+      const res = await supabase
+        .from('maintenance_requests')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(50);
+      data = res.data;
+      error = res.error;
+
+      if (data && data.length > 0) {
         try {
           const { data: parksList } = await supabase.from('parks').select('id, name');
           const parkMap = {};
           (parksList || []).forEach(p => { parkMap[p.id] = p.name; });
-
-          result = data.map(item => ({
+          data = data.map(item => ({
             ...item,
             parks: item.parks || (item.park_id && parkMap[item.park_id] ? { name: parkMap[item.park_id] } : null),
           }));
-        } catch (e) {
-          result = data;
-        }
+        } catch (e) {}
       }
-    } catch (e) {
-      console.warn('Tier 3 query failed:', e);
     }
+
+    return { data: data || [], error: null };
+  } catch (e) {
+    console.error('Error fetching public maintenance issues from server:', e);
+    return { data: [], error: e };
   }
-
-  // Merge with cached local complaints so unauthenticated public users ALWAYS see tickets
-  const cached = getCachedComplaints();
-  const mergedMap = new Map();
-
-  // Primary: DB results
-  result.forEach(item => {
-    const key = item.ticket_code || item.id;
-    mergedMap.set(key, item);
-  });
-
-  // Secondary: Cached items (if not already present from DB)
-  cached.forEach(item => {
-    const key = item.ticket_code || item.id;
-    if (!mergedMap.has(key)) {
-      mergedMap.set(key, item);
-    } else {
-      // Merge resolution fields if cached item has resolution notes
-      const existing = mergedMap.get(key);
-      if (!existing.resolution_note && item.resolution_note) {
-        mergedMap.set(key, {
-          ...existing,
-          resolution_note: item.resolution_note,
-          resolution_image_url: item.resolution_image_url || existing.resolution_image_url,
-          status: item.status || existing.status
-        });
-      }
-    }
-  });
-
-  const finalData = Array.from(mergedMap.values());
-  return { data: finalData, error: null };
 }
 
+/**
+ * Search complaint by ticket code, phone number, or ID directly from the server database
+ */
 export async function getComplaintByTicketOrPhone(lookupTerm) {
   if (!lookupTerm) return { data: [], error: null };
   const cleanTerm = String(lookupTerm).trim();
   const upperTerm = cleanTerm.toUpperCase();
 
-  // 1. Try ticket_code exact match first
-  let res = await fetchWithFallbacks(q => q.eq('ticket_code', upperTerm).order('created_at', { ascending: false }));
-  if (res.data && res.data.length > 0) return res;
+  try {
+    // 1. Ticket Code exact match
+    let { data, error } = await supabase
+      .from('maintenance_requests')
+      .select('*, parks(name), profiles(full_name)')
+      .eq('ticket_code', upperTerm)
+      .order('created_at', { ascending: false });
 
-  // 2. Try visitor_phone exact match
-  res = await fetchWithFallbacks(q => q.eq('visitor_phone', cleanTerm).order('created_at', { ascending: false }));
-  if (res.data && res.data.length > 0) return res;
+    if (error || !data || data.length === 0) {
+      const res = await supabase
+        .from('maintenance_requests')
+        .select('*, parks(name)')
+        .eq('ticket_code', upperTerm)
+        .order('created_at', { ascending: false });
+      if (res.data && res.data.length > 0) {
+        data = res.data;
+        error = null;
+      }
+    }
 
-  // 3. Try UUID id match if it looks like a valid UUID
-  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  if (uuidRegex.test(cleanTerm)) {
-    res = await fetchWithFallbacks(q => q.eq('id', cleanTerm));
-    if (res.data && res.data.length > 0) return res;
+    if (error || !data || data.length === 0) {
+      const res = await supabase
+        .from('maintenance_requests')
+        .select('*')
+        .eq('ticket_code', upperTerm)
+        .order('created_at', { ascending: false });
+      if (res.data && res.data.length > 0) {
+        data = res.data;
+        error = null;
+      }
+    }
+
+    if (data && data.length > 0) return { data, error: null };
+
+    // 2. Phone number match
+    const phoneRes = await supabase
+      .from('maintenance_requests')
+      .select('*, parks(name)')
+      .eq('visitor_phone', cleanTerm)
+      .order('created_at', { ascending: false });
+    if (!phoneRes.error && phoneRes.data && phoneRes.data.length > 0) {
+      return { data: phoneRes.data, error: null };
+    }
+
+    // 3. UUID ID match
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (uuidRegex.test(cleanTerm)) {
+      const uuidRes = await supabase
+        .from('maintenance_requests')
+        .select('*, parks(name)')
+        .eq('id', cleanTerm);
+      if (!uuidRes.error && uuidRes.data && uuidRes.data.length > 0) {
+        return { data: uuidRes.data, error: null };
+      }
+    }
+
+    // 4. Fuzzy ticket_code match
+    const fuzzyRes = await supabase
+      .from('maintenance_requests')
+      .select('*, parks(name)')
+      .ilike('ticket_code', `%${cleanTerm}%`)
+      .order('created_at', { ascending: false });
+    if (!fuzzyRes.error && fuzzyRes.data && fuzzyRes.data.length > 0) {
+      return { data: fuzzyRes.data, error: null };
+    }
+
+    // 5. Description fuzzy match
+    const descRes = await supabase
+      .from('maintenance_requests')
+      .select('*, parks(name)')
+      .ilike('description', `%${cleanTerm}%`)
+      .order('created_at', { ascending: false })
+      .limit(10);
+    return { data: descRes.data || [], error: descRes.error };
+
+  } catch (e) {
+    console.error('Error looking up complaint from server:', e);
+    return { data: [], error: e };
   }
-
-  // 4. Fuzzy ilike fallback on ticket_code
-  res = await fetchWithFallbacks(q => q.ilike('ticket_code', `%${cleanTerm}%`).order('created_at', { ascending: false }));
-  if (res.data && res.data.length > 0) return res;
-
-  // 5. Final fallback — search description
-  return fetchWithFallbacks(q => q.ilike('description', `%${cleanTerm}%`).order('created_at', { ascending: false }).limit(10));
-}
-
-export async function getPublicIssues() {
-  return fetchWithFallbacks(q => q.order('created_at', { ascending: false }).limit(50));
 }
 
 export async function deleteComplaint(id) {

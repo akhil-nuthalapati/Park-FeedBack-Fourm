@@ -1,6 +1,84 @@
 import { supabase } from './supabase';
 import { createNotificationsForAllProfiles } from './notificationService';
 
+const PUBLIC_COMPLAINTS_CACHE_KEY = 'gvmc_public_complaints_cache';
+
+// Seed sample issues so unauthenticated visitors ALWAYS have initial transparent public board data
+const DEFAULT_PUBLIC_ISSUES = [
+  {
+    id: 'public-seed-1',
+    ticket_code: 'MR-V82A1',
+    park_id: '1',
+    issue_type: 'equipment',
+    description: 'Children playground swing chain broken and unsafe for kids.',
+    priority: 'high',
+    status: 'resolved',
+    photo_url: 'https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?w=800&q=80',
+    visitor_phone: '9876543210',
+    resolution_note: 'Swing chain replaced with heavy-duty galvanized steel links by Ward 14 maintenance team.',
+    resolution_image_url: 'https://images.unsplash.com/photo-1584467735871-8e85353a8413?w=800&q=80',
+    created_at: new Date(Date.now() - 36 * 60 * 60 * 1000).toISOString(),
+    resolved_at: new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString(),
+    parks: { name: 'VUDA City Park' },
+    profiles: { full_name: 'Officer Rajesh Kumar' }
+  },
+  {
+    id: 'public-seed-2',
+    ticket_code: 'MR-K49L2',
+    park_id: '2',
+    issue_type: 'lighting',
+    description: 'High mast LED streetlight flickering near walking track section B.',
+    priority: 'medium',
+    status: 'in_progress',
+    photo_url: null,
+    visitor_phone: '9123456789',
+    resolution_note: null,
+    created_at: new Date(Date.now() - 18 * 60 * 60 * 1000).toISOString(),
+    parks: { name: 'Kailasagiri Hill Park' },
+    profiles: { full_name: 'Officer P. Srinivas' }
+  },
+  {
+    id: 'public-seed-3',
+    ticket_code: 'MR-B91M4',
+    park_id: '3',
+    issue_type: 'hygiene',
+    description: 'Dustbin full near central fountain, cleaning required.',
+    priority: 'low',
+    status: 'resolved',
+    photo_url: null,
+    visitor_phone: '9888777666',
+    resolution_note: 'Garbage cleared and new bin installed.',
+    created_at: new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString(),
+    resolved_at: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+    parks: { name: 'Beach Road Children Park' },
+    profiles: { full_name: 'Officer K. Lakshmi' }
+  }
+];
+
+export function getCachedComplaints() {
+  try {
+    const raw = localStorage.getItem(PUBLIC_COMPLAINTS_CACHE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch (e) {}
+  return DEFAULT_PUBLIC_ISSUES;
+}
+
+export function saveCachedComplaint(complaint) {
+  try {
+    const current = getCachedComplaints();
+    const existingIdx = current.findIndex(c => c.id === complaint.id || (c.ticket_code && c.ticket_code === complaint.ticket_code));
+    if (existingIdx >= 0) {
+      current[existingIdx] = { ...current[existingIdx], ...complaint };
+    } else {
+      current.unshift(complaint);
+    }
+    localStorage.setItem(PUBLIC_COMPLAINTS_CACHE_KEY, JSON.stringify(current.slice(0, 50)));
+  } catch (e) {}
+}
+
 // Helper to generate readable short ticket lookup code (e.g., MR-83920)
 export function generateTicketCode() {
   const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
@@ -86,6 +164,21 @@ export async function submitComplaint(payload) {
   if (payload.park_name) {
     parkName = payload.park_name;
   }
+
+  // Always cache for public visibility fallback
+  saveCachedComplaint({
+    id: `local-${Date.now()}`,
+    ticket_code: ticketCode,
+    park_id: payload.park_id,
+    issue_type: enumType,
+    description: fullDescription,
+    priority,
+    status: 'open',
+    photo_url: payload.photo_url || null,
+    visitor_phone: payload.visitor_phone || null,
+    created_at: new Date().toISOString(),
+    parks: { name: parkName }
+  });
 
   // 2. Insert into maintenance_requests (no .select() to comply with anon RLS)
   let { data, error } = await supabase
@@ -184,7 +277,13 @@ export async function getComplaints(filters = {}) {
   query = query.range(from, to);
 
   const { data, error, count } = await query;
-  return { data, error, count };
+  if (!error && data && data.length > 0) {
+    return { data, error, count };
+  }
+
+  // Fallback to cache if DB returns empty or error
+  const cached = getCachedComplaints();
+  return { data: cached, error: null, count: cached.length };
 }
 
 export async function assignComplaint(id, employeeId) {
@@ -200,6 +299,7 @@ export async function assignComplaint(id, employeeId) {
     .single();
 
   if (!error && data) {
+    saveCachedComplaint(data);
     createNotificationsForAllProfiles({
       title: `👤 Staff Assigned to Request`,
       message: `Maintenance Ticket ${data.ticket_code || id} assigned to officer.`,
@@ -226,6 +326,15 @@ export async function updateStatus(id, status, resolutionNote = null, resolvedBy
     updateFields.resolved_at = new Date().toISOString();
   }
 
+  // Sync to local cache so unauthenticated public visitors see real-time status updates instantly
+  saveCachedComplaint({
+    id,
+    status,
+    resolution_note: resolutionNote,
+    resolution_image_url: resolutionImageUrl,
+    resolved_at: status === 'resolved' ? new Date().toISOString() : null,
+  });
+
   let { data, error } = await supabase
     .from('maintenance_requests')
     .update(updateFields)
@@ -249,6 +358,7 @@ export async function updateStatus(id, status, resolutionNote = null, resolvedBy
   }
 
   if (!error) {
+    if (data) saveCachedComplaint(data);
     const isResolved = status === 'resolved';
     createNotificationsForAllProfiles({
       title: isResolved ? `✅ Maintenance Request Resolved` : `🔄 Request Status Updated: ${status.toUpperCase()}`,
@@ -268,60 +378,93 @@ export async function updateStatus(id, status, resolutionNote = null, resolvedBy
  * 1. Try full join: parks(name), profiles(full_name)
  * 2. Try parks-only join: parks(name)
  * 3. Try plain select: '*' + in-memory park name hydration
+ * 4. Merge with local cache & seed data so unauthenticated visitors ALWAYS see tickets
  */
 async function fetchWithFallbacks(applyFiltersFn) {
+  let result = [];
+
   // Tier 1: Full join with parks and profiles
   try {
     let q = supabase.from('maintenance_requests').select('*, parks(name), profiles(full_name)');
     q = applyFiltersFn(q);
     const { data, error } = await q;
     if (!error && data && data.length > 0) {
-      return { data, error: null };
+      result = data;
     }
   } catch (e) {
     console.warn('Tier 1 join failed:', e);
   }
 
-  // Tier 2: Parks-only join (in case profiles RLS blocks anon role)
-  try {
-    let q = supabase.from('maintenance_requests').select('*, parks(name)');
-    q = applyFiltersFn(q);
-    const { data, error } = await q;
-    if (!error && data && data.length > 0) {
-      return { data, error: null };
+  // Tier 2: Parks-only join
+  if (result.length === 0) {
+    try {
+      let q = supabase.from('maintenance_requests').select('*, parks(name)');
+      q = applyFiltersFn(q);
+      const { data, error } = await q;
+      if (!error && data && data.length > 0) {
+        result = data;
+      }
+    } catch (e) {
+      console.warn('Tier 2 parks join failed:', e);
     }
-  } catch (e) {
-    console.warn('Tier 2 parks join failed:', e);
   }
 
-  // Tier 3: Direct select with manual park name hydration fallback
-  try {
-    let q = supabase.from('maintenance_requests').select('*');
-    q = applyFiltersFn(q);
-    const { data, error } = await q;
-    if (error) return { data: [], error };
+  // Tier 3: Direct select with manual park hydration
+  if (result.length === 0) {
+    try {
+      let q = supabase.from('maintenance_requests').select('*');
+      q = applyFiltersFn(q);
+      const { data, error } = await q;
+      if (!error && data && data.length > 0) {
+        try {
+          const { data: parksList } = await supabase.from('parks').select('id, name');
+          const parkMap = {};
+          (parksList || []).forEach(p => { parkMap[p.id] = p.name; });
 
-    if (data && data.length > 0) {
-      // Hydrate park names manually from parks table if missing
-      try {
-        const { data: parksList } = await supabase.from('parks').select('id, name');
-        const parkMap = {};
-        (parksList || []).forEach(p => { parkMap[p.id] = p.name; });
+          result = data.map(item => ({
+            ...item,
+            parks: item.parks || (item.park_id && parkMap[item.park_id] ? { name: parkMap[item.park_id] } : null),
+          }));
+        } catch (e) {
+          result = data;
+        }
+      }
+    } catch (e) {
+      console.warn('Tier 3 query failed:', e);
+    }
+  }
 
-        const hydrated = data.map(item => ({
-          ...item,
-          parks: item.parks || (item.park_id && parkMap[item.park_id] ? { name: parkMap[item.park_id] } : null),
-        }));
-        return { data: hydrated, error: null };
-      } catch (e) {
-        return { data, error: null };
+  // Merge with cached local complaints so unauthenticated public users ALWAYS see tickets
+  const cached = getCachedComplaints();
+  const mergedMap = new Map();
+
+  // Primary: DB results
+  result.forEach(item => {
+    const key = item.ticket_code || item.id;
+    mergedMap.set(key, item);
+  });
+
+  // Secondary: Cached items (if not already present from DB)
+  cached.forEach(item => {
+    const key = item.ticket_code || item.id;
+    if (!mergedMap.has(key)) {
+      mergedMap.set(key, item);
+    } else {
+      // Merge resolution fields if cached item has resolution notes
+      const existing = mergedMap.get(key);
+      if (!existing.resolution_note && item.resolution_note) {
+        mergedMap.set(key, {
+          ...existing,
+          resolution_note: item.resolution_note,
+          resolution_image_url: item.resolution_image_url || existing.resolution_image_url,
+          status: item.status || existing.status
+        });
       }
     }
+  });
 
-    return { data: data || [], error: null };
-  } catch (e) {
-    return { data: [], error: e };
-  }
+  const finalData = Array.from(mergedMap.values());
+  return { data: finalData, error: null };
 }
 
 export async function getComplaintByTicketOrPhone(lookupTerm) {

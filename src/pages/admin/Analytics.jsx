@@ -32,8 +32,8 @@ export default function Analytics() {
       setLoading(true);
       try {
         // Fetch existing broadcast announcement
-        const currentAlert = getBroadcastAnnouncement();
-        if (currentAlert) {
+        const currentAlert = await getBroadcastAnnouncement();
+        if (currentAlert && currentAlert.message) {
           setAnnouncementForm({
             message: currentAlert.message || '',
             type: currentAlert.type || 'info',

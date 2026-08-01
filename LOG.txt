@@ -7,11 +7,22 @@ Started: 2026-07-31
 
 ================================================================================
 
-[2026-07-31 12:18:00] CHECKPOINT 01 — Project Planning
+[2026-08-01 10:05:00] CHECKPOINT 18 — Admin Dashboard Render Safety & ErrorBoundary Integration
 STATUS: COMPLETED
-FILES: implementation_plan.md
-NOTES: Analyzed README.md, assessed empty scaffold, created 11-phase plan.
-       All existing files are empty (0 bytes). Full greenfield build required.
+FILES: src/components/ErrorBoundary.jsx, src/routes/AppRoutes.jsx, src/pages/Dashboard.jsx, src/pages/admin/Analytics.jsx
+NOTES: Added React ErrorBoundary to prevent blank white screens on display errors. Fixed async await in Analytics.jsx and added defensive fallback checks for dashboard metrics.
+---
+
+[2026-08-01 09:58:00] CHECKPOINT 17 — Profile Notifications, Feedback Loop & Auto-Escalation Implemented
+STATUS: COMPLETED
+FILES: supabase/add_notifications_and_resolution.sql, src/services/notificationService.js, src/services/maintenanceService.js, src/pages/TrackStatus.jsx, src/pages/Maintenance.jsx, src/pages/ThankYou.jsx, src/pages/admin/MaintenanceManagement.jsx, src/layouts/AdminLayout.jsx
+NOTES: Implemented system-wide staff profile notifications, closed feedback loop with staff resolution notes and public ticket tracking (/track-status), and duplicate issue auto-escalation (3+ reports within 48h auto-bump to HIGH priority).
+---
+
+[2026-08-01 09:48:00] CHECKPOINT 16 — Maintenance Anonymous Insert RLS Policy Fix
+STATUS: COMPLETED
+FILES: src/services/maintenanceService.js
+NOTES: Resolved HTTP 401 RLS policy violation on public maintenance request submission by removing .select() from anon insert queries.
 ---
 
 [2026-07-31 16:10:00] CHECKPOINT 15 — RLS Profiles Policy Updated
@@ -32,7 +43,6 @@ NOTES: Created clear_data.sql to wipe placeholder rows from visits, feedback, an
 [2026-07-31 14:57:00] CHECKPOINT 12 — GVMC Contact Updates & Standalone Admin Portal Created
 STATUS: COMPLETED
 FILES: src/components/Footer.jsx, src/pages/Home.jsx, admin-portal/*
-NOTES: Updated footer with real GVMC contact details (helplines 1913, 0891-2868686, commissioner_gvmc@yahoo.co.in). Connected live metrics on Home page. Created standalone admin-portal app for managing admin credentials.
 ---
 [2026-07-31 14:12:00] CHECKPOINT 11 — Codebase Comment Cleanup
 STATUS: COMPLETED

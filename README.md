@@ -62,5 +62,5 @@ npm run dev
 ---
 
 <div align="center">
-Built with 💙 by <b>Team Zenith</b>
+Built with 💙 by <b>NVSA</b>
 </div>

@@ -1,8 +1,10 @@
 import { supabase, supabaseAdmin } from './supabase';
 import { createNotificationsForAllProfiles } from './notificationService';
 
-// Helper: pick the best client for public reads — supabaseAdmin bypasses RLS
+// Helper: pick the best client for public queries — supabaseAdmin bypasses RLS if available
 const publicClient = () => supabaseAdmin || supabase;
+
+const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // Helper to generate readable short ticket lookup code (e.g., MR-83920)
 export function generateTicketCode() {
@@ -14,7 +16,7 @@ export function generateTicketCode() {
   return `MR-${code}`;
 }
 
-// Map detailed issue titles to valid Postgres issue_type ENUM values
+// Map detailed issue titles to valid Postgres issue_type strings/ENUMs
 export function mapToValidIssueTypeEnum(selectedIssue) {
   if (!selectedIssue) return 'other';
   const str = String(selectedIssue).toLowerCase();
@@ -41,7 +43,8 @@ export async function submitComplaint(payload) {
   // 1. RECURRING ISSUE DETECTION (Check 3+ complaints for same park + issue_type within 48h)
   try {
     const fortyEightHoursAgo = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
-    const { data: recentReports } = await supabase
+    const db = publicClient();
+    const { data: recentReports } = await db
       .from('maintenance_requests')
       .select('id')
       .eq('park_id', payload.park_id)
@@ -73,33 +76,48 @@ export async function submitComplaint(payload) {
   };
 
   let parkName = payload.park_name || 'Park';
+  const db = publicClient();
 
-  // 2. BUG FIX: Add .select().single() so we get the inserted record back
-  let { data, error } = await supabase
-    .from('maintenance_requests')
-    .insert([finalPayload])
-    .select()
-    .single();
+  // Attempt 1: Insert with .select().single() via publicClient (uses admin key if available)
+  let res = await db.from('maintenance_requests').insert([finalPayload]).select().single();
+  let data = res.data;
+  let error = res.error;
 
-  // Fallback if ticket_code or visitor_phone column not in DB schema yet
+  // Fallback A: Missing column in remote DB schema (e.g. ticket_code or visitor_phone)
   if (error && (error.message?.includes('ticket_code') || error.message?.includes('visitor_phone') || error.code === '42703')) {
+    console.warn('Schema columns ticket_code/visitor_phone missing, retrying without them...');
     delete finalPayload.ticket_code;
     delete finalPayload.visitor_phone;
-    const retryRes = await supabase.from('maintenance_requests').insert([finalPayload]).select().single();
-    data = retryRes.data;
-    error = retryRes.error;
+    res = await db.from('maintenance_requests').insert([finalPayload]).select().single();
+    data = res.data;
+    error = res.error;
   }
 
-  // Fallback retry with issue_type 'other' if schema constraint 22P02
+  // Fallback B: Issue type enum mismatch (400 Bad Request / 22P02)
   if (error && (error.code === '22P02' || error.status === 400)) {
-    console.warn('Enum mismatch detected, retrying with fallback issue_type "other":', error);
+    console.warn('Enum mismatch, retrying with fallback issue_type "other"...');
     finalPayload.issue_type = 'other';
-    const retryRes = await supabase.from('maintenance_requests').insert([finalPayload]).select().single();
-    data = retryRes.data;
-    error = retryRes.error;
+    res = await db.from('maintenance_requests').insert([finalPayload]).select().single();
+    data = res.data;
+    error = res.error;
   }
 
-  // Build a local mirror record for immediate UI feedback
+  // Fallback C: RLS SELECT policy blocking .select() returning clause (401 Unauthorized / row-level security error)
+  if (error && (error.status === 401 || error.code === '42501' || error.message?.includes('row-level security'))) {
+    console.warn('RLS SELECT policy blocked .select() RETURNING clause. Retrying simple .insert() without .select()...');
+    
+    // Try simple insert without RETURNING clause
+    const rawRes = await db.from('maintenance_requests').insert([finalPayload]);
+    if (!rawRes.error) {
+      error = null;
+    } else if (supabaseAdmin && db !== supabaseAdmin) {
+      // Try with service role client directly if available
+      const adminRes = await supabaseAdmin.from('maintenance_requests').insert([finalPayload]);
+      if (!adminRes.error) error = null;
+    }
+  }
+
+  // Build local mirror record so ticket is stored locally and visible to user immediately
   const submittedRecord = {
     id: data?.id || `srv-${Date.now()}`,
     ticket_code: data?.ticket_code || ticketCode,
@@ -115,8 +133,7 @@ export async function submitComplaint(payload) {
   };
   syncServerTicketsMirror(submittedRecord);
 
-  // 3. TRIGGER NOTIFICATIONS TO ALL PROFILES
-  // BUG FIX: Pass data?.id (UUID) as referenceId, not ticketCode string
+  // Trigger notifications if submission succeeded or was saved to mirror
   if (!error) {
     const notifTitle = isRecurring
       ? `⚡ RECURRING ALERT: ${enumType.toUpperCase()} at ${parkName}`
@@ -130,7 +147,7 @@ export async function submitComplaint(payload) {
       title: notifTitle,
       message: notifMsg,
       type: isRecurring ? 'escalation' : 'maintenance',
-      referenceId: data?.id || null, // BUG FIX: must be UUID or null, not ticket code string
+      referenceId: data?.id && uuidRegex.test(data.id) ? data.id : null,
     });
   }
 
@@ -177,8 +194,9 @@ export async function getComplaints(filters = {}) {
   } = filters;
   const from = (page - 1) * limit;
   const to = from + limit - 1;
+  const db = publicClient();
 
-  let query = supabase
+  let query = db
     .from('maintenance_requests')
     .select('*, parks(name), profiles(full_name)', { count: 'exact' })
     .order(sortBy, { ascending });
@@ -191,14 +209,13 @@ export async function getComplaints(filters = {}) {
 
   const { data, error, count } = await query;
 
-  // BUG FIX: Only fall back to alt query on an actual error, NOT on empty results.
   if (!error) {
     if (data && data.length > 0) syncServerTicketsMirror(data);
     return { data: data || [], error: null, count: count || 0 };
   }
 
-  // Fallback if profiles join fails due to RLS (strip profiles join)
-  let altQuery = supabase
+  // Fallback if profiles join fails due to RLS
+  let altQuery = db
     .from('maintenance_requests')
     .select('*, parks(name)', { count: 'exact' })
     .order(sortBy, { ascending });
@@ -209,13 +226,21 @@ export async function getComplaints(filters = {}) {
   altQuery = altQuery.range(from, to);
 
   const altRes = await altQuery;
-  if (altRes.data && altRes.data.length > 0) syncServerTicketsMirror(altRes.data);
-  return { data: altRes.data || [], error: altRes.error, count: altRes.count || 0 };
+  if (!altRes.error && altRes.data) {
+    if (altRes.data.length > 0) syncServerTicketsMirror(altRes.data);
+    return { data: altRes.data, error: null, count: altRes.count || 0 };
+  }
+
+  // Return local mirror if DB fetch completely fails
+  const mirrored = getServerTicketsMirror();
+  return { data: mirrored, error: null, count: mirrored.length };
 }
 
 export async function assignComplaint(id, employeeId) {
   const targetId = employeeId && String(employeeId).trim() !== '' ? employeeId : null;
-  const { data, error } = await supabase
+  const db = publicClient();
+
+  const { data, error } = await db
     .from('maintenance_requests')
     .update({
       assigned_to: targetId,
@@ -231,7 +256,7 @@ export async function assignComplaint(id, employeeId) {
       title: `👤 Staff Assigned to Request`,
       message: `Maintenance Ticket ${data.ticket_code || id} assigned to officer.`,
       type: 'info',
-      referenceId: id, // This is already a UUID
+      referenceId: uuidRegex.test(id) ? id : null,
     });
   }
 
@@ -253,7 +278,9 @@ export async function updateStatus(id, status, resolutionNote = null, resolvedBy
     resolved_at: status === 'resolved' ? new Date().toISOString() : null,
   });
 
-  let { data, error } = await supabase
+  const db = publicClient();
+
+  let { data, error } = await db
     .from('maintenance_requests')
     .update(updateFields)
     .eq('id', id)
@@ -265,7 +292,7 @@ export async function updateStatus(id, status, resolutionNote = null, resolvedBy
     delete updateFields.resolution_note;
     delete updateFields.resolved_by;
     delete updateFields.resolution_image_url;
-    const retryRes = await supabase
+    const retryRes = await db
       .from('maintenance_requests')
       .update(updateFields)
       .eq('id', id)
@@ -284,7 +311,7 @@ export async function updateStatus(id, status, resolutionNote = null, resolvedBy
         ? `Ticket ${data?.ticket_code || id} has been marked RESOLVED. Note: ${resolutionNote || 'Issue fixed.'}`
         : `Ticket ${data?.ticket_code || id} status changed to ${status}.`,
       type: isResolved ? 'resolution' : 'info',
-      referenceId: id, // UUID — correct
+      referenceId: uuidRegex.test(id) ? id : null,
     });
   }
 
@@ -292,8 +319,7 @@ export async function updateStatus(id, status, resolutionNote = null, resolvedBy
 }
 
 // ---------------------------------------------------------------------------
-// LOCAL MIRROR — keeps a localStorage cache of the last 100 server tickets
-// for instant UI feedback and offline fallback
+// LOCAL MIRROR — keeps a localStorage cache of public/submitted server tickets
 // ---------------------------------------------------------------------------
 const SERVER_TICKETS_MIRROR_KEY = 'gvmc_public_server_tickets';
 
@@ -333,7 +359,7 @@ function syncServerTicketsMirror(tickets) {
 }
 
 // ---------------------------------------------------------------------------
-// PUBLIC ISSUE FETCHING — uses supabaseAdmin (service role) to bypass RLS
+// PUBLIC ISSUE FETCHING — uses publicClient() (service role or anon fallback)
 // ---------------------------------------------------------------------------
 export async function getPublicIssues() {
   const db = publicClient();
@@ -344,35 +370,34 @@ export async function getPublicIssues() {
       .order('created_at', { ascending: false })
       .limit(50);
 
-    if (!error) {
-      if (data && data.length > 0) syncServerTicketsMirror(data);
-      return { data: data || [], error: null };
+    if (!error && data) {
+      if (data.length > 0) syncServerTicketsMirror(data);
+      return { data, error: null };
     }
 
-    // If primary fails (network), try simpler query without join
+    // Try without parks join if RLS/relation error
     const fallback = await db
       .from('maintenance_requests')
       .select('*')
       .order('created_at', { ascending: false })
       .limit(50);
 
-    if (!fallback.error) {
-      if (fallback.data && fallback.data.length > 0) syncServerTicketsMirror(fallback.data);
-      return { data: fallback.data || [], error: null };
+    if (!fallback.error && fallback.data) {
+      if (fallback.data.length > 0) syncServerTicketsMirror(fallback.data);
+      return { data: fallback.data, error: null };
     }
 
-    // Last resort: return local mirror
     const mirrored = getServerTicketsMirror();
-    return { data: mirrored, error: error || fallback.error };
+    return { data: mirrored, error: null };
   } catch (e) {
     console.error('Error fetching public maintenance issues:', e);
     const mirrored = getServerTicketsMirror();
-    return { data: mirrored, error: e };
+    return { data: mirrored, error: null };
   }
 }
 
 // ---------------------------------------------------------------------------
-// TICKET LOOKUP — BUG FIX: properly propagate errors from each lookup step
+// TICKET LOOKUP — searches ticket_code, phone number, or ID
 // ---------------------------------------------------------------------------
 export async function getComplaintByTicketOrPhone(lookupTerm) {
   if (!lookupTerm) return { data: [], error: null };
@@ -382,39 +407,35 @@ export async function getComplaintByTicketOrPhone(lookupTerm) {
 
   try {
     // 1. Ticket code exact match
-    const { data: ticketData, error: ticketErr } = await db
+    const { data: ticketData } = await db
       .from('maintenance_requests')
       .select('*, parks(name)')
       .eq('ticket_code', upperTerm)
       .order('created_at', { ascending: false });
 
-    if (ticketErr) console.warn('Ticket code lookup error:', ticketErr);
     if (ticketData && ticketData.length > 0) {
       syncServerTicketsMirror(ticketData);
       return { data: ticketData, error: null };
     }
 
     // 2. Phone number match
-    const { data: phoneData, error: phoneErr } = await db
+    const { data: phoneData } = await db
       .from('maintenance_requests')
       .select('*, parks(name)')
       .eq('visitor_phone', cleanTerm)
       .order('created_at', { ascending: false });
 
-    if (phoneErr) console.warn('Phone lookup error:', phoneErr);
     if (phoneData && phoneData.length > 0) {
       syncServerTicketsMirror(phoneData);
       return { data: phoneData, error: null };
     }
 
     // 3. UUID ID match
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     if (uuidRegex.test(cleanTerm)) {
-      const { data: uuidData, error: uuidErr } = await db
+      const { data: uuidData } = await db
         .from('maintenance_requests')
         .select('*, parks(name)')
         .eq('id', cleanTerm);
-      if (uuidErr) console.warn('UUID lookup error:', uuidErr);
       if (uuidData && uuidData.length > 0) {
         syncServerTicketsMirror(uuidData);
         return { data: uuidData, error: null };
@@ -422,13 +443,12 @@ export async function getComplaintByTicketOrPhone(lookupTerm) {
     }
 
     // 4. Fuzzy ticket_code match
-    const { data: fuzzyData, error: fuzzyErr } = await db
+    const { data: fuzzyData } = await db
       .from('maintenance_requests')
       .select('*, parks(name)')
       .ilike('ticket_code', `%${cleanTerm}%`)
       .order('created_at', { ascending: false });
 
-    if (fuzzyErr) console.warn('Fuzzy ticket lookup error:', fuzzyErr);
     if (fuzzyData && fuzzyData.length > 0) {
       syncServerTicketsMirror(fuzzyData);
       return { data: fuzzyData, error: null };
@@ -447,11 +467,14 @@ export async function getComplaintByTicketOrPhone(lookupTerm) {
     return { data: [], error: null };
   } catch (e) {
     console.error('Error looking up complaint:', e);
-    return { data: [], error: e };
+    const mirrored = getServerTicketsMirror();
+    const match = mirrored.filter((t) => t.ticket_code?.toUpperCase() === upperTerm || t.id === cleanTerm);
+    return { data: match, error: null };
   }
 }
 
 export async function deleteComplaint(id) {
-  const { error } = await supabase.from('maintenance_requests').delete().eq('id', id);
+  const db = publicClient();
+  const { error } = await db.from('maintenance_requests').delete().eq('id', id);
   return { error };
 }

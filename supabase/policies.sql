@@ -2,9 +2,9 @@
 -- Park Maintenance System — Row Level Security Policies
 -- Team Zenith
 -- =============================================================================
--- Run AFTER schema.sql and functions.sql.
+-- Run AFTER schema.sql, functions.sql, and add_notifications_and_resolution.sql.
 -- Enables RLS on all tables and creates named, single-purpose policies
--- enforcing the permission matrix from the specification.
+-- enforcing public citizen access and admin controls.
 -- =============================================================================
 
 -- ---------------------------------------------------------------------------
@@ -38,19 +38,13 @@ ALTER TABLE profiles             ENABLE ROW LEVEL SECURITY;
 -- 2. PARKS POLICIES
 -- ---------------------------------------------------------------------------
 
--- Anonymous visitors can read parks for public issue board & checkin
-DROP POLICY IF EXISTS "anon_read_active_parks" ON parks;
+-- Public read access for parks directory & entrance check-ins
 DROP POLICY IF EXISTS "anon_read_parks" ON parks;
-CREATE POLICY "anon_read_parks"
-  ON parks FOR SELECT
-  TO anon
-  USING (true);
-
--- Authenticated users (all roles) can read all parks
 DROP POLICY IF EXISTS "auth_read_all_parks" ON parks;
-CREATE POLICY "auth_read_all_parks"
+DROP POLICY IF EXISTS "public_read_parks" ON parks;
+CREATE POLICY "public_read_parks"
   ON parks FOR SELECT
-  TO authenticated
+  TO anon, authenticated
   USING (true);
 
 -- ADMIN and SUPER_ADMIN can insert parks
@@ -79,34 +73,15 @@ CREATE POLICY "super_admin_delete_parks"
 -- 3. VISITS POLICIES
 -- ---------------------------------------------------------------------------
 
--- BUG FIX: Anonymous visitors MUST be able to SELECT visits so public Home
--- page stats ("Today's Visitors") are visible without login.
-DROP POLICY IF EXISTS "anon_read_visits" ON visits;
-CREATE POLICY "anon_read_visits"
-  ON visits FOR SELECT
-  TO anon
-  USING (true);
-
--- Anonymous visitors can INSERT (check-in)
+-- Public access to log visits and read visitor footfall counts
 DROP POLICY IF EXISTS "anon_insert_visits" ON visits;
-CREATE POLICY "anon_insert_visits"
-  ON visits FOR INSERT
-  TO anon
-  WITH CHECK (true);
-
--- Authenticated users can also insert visits
 DROP POLICY IF EXISTS "auth_insert_visits" ON visits;
-CREATE POLICY "auth_insert_visits"
-  ON visits FOR INSERT
-  TO authenticated
-  WITH CHECK (true);
-
--- Authenticated users (all roles) can read visits
 DROP POLICY IF EXISTS "auth_read_visits" ON visits;
-CREATE POLICY "auth_read_visits"
-  ON visits FOR SELECT
-  TO authenticated
-  USING (true);
+DROP POLICY IF EXISTS "public_insert_visits" ON visits;
+DROP POLICY IF EXISTS "public_read_visits" ON visits;
+
+CREATE POLICY "public_insert_visits" ON visits FOR INSERT TO anon, authenticated WITH CHECK (true);
+CREATE POLICY "public_read_visits"   ON visits FOR SELECT TO anon, authenticated USING (true);
 
 -- SUPER_ADMIN can delete visits
 DROP POLICY IF EXISTS "super_admin_delete_visits" ON visits;
@@ -119,34 +94,15 @@ CREATE POLICY "super_admin_delete_visits"
 -- 4. FEEDBACK POLICIES
 -- ---------------------------------------------------------------------------
 
--- BUG FIX: Anonymous visitors MUST be able to SELECT feedback so the public
--- Home page "Average Rating" stat is visible without login.
-DROP POLICY IF EXISTS "anon_read_feedback" ON feedback;
-CREATE POLICY "anon_read_feedback"
-  ON feedback FOR SELECT
-  TO anon
-  USING (true);
-
--- Anonymous visitors can INSERT only
+-- Public access to submit ratings and read average score metrics
 DROP POLICY IF EXISTS "anon_insert_feedback" ON feedback;
-CREATE POLICY "anon_insert_feedback"
-  ON feedback FOR INSERT
-  TO anon
-  WITH CHECK (true);
-
--- Authenticated users can also insert feedback
 DROP POLICY IF EXISTS "auth_insert_feedback" ON feedback;
-CREATE POLICY "auth_insert_feedback"
-  ON feedback FOR INSERT
-  TO authenticated
-  WITH CHECK (true);
-
--- Authenticated users (all roles) can read feedback
 DROP POLICY IF EXISTS "auth_read_feedback" ON feedback;
-CREATE POLICY "auth_read_feedback"
-  ON feedback FOR SELECT
-  TO authenticated
-  USING (true);
+DROP POLICY IF EXISTS "public_insert_feedback" ON feedback;
+DROP POLICY IF EXISTS "public_read_feedback" ON feedback;
+
+CREATE POLICY "public_insert_feedback" ON feedback FOR INSERT TO anon, authenticated WITH CHECK (true);
+CREATE POLICY "public_read_feedback"   ON feedback FOR SELECT TO anon, authenticated USING (true);
 
 -- SUPER_ADMIN can delete feedback
 DROP POLICY IF EXISTS "super_admin_delete_feedback" ON feedback;
@@ -159,28 +115,18 @@ CREATE POLICY "super_admin_delete_feedback"
 -- 5. MAINTENANCE REQUESTS POLICIES
 -- ---------------------------------------------------------------------------
 
--- Anonymous visitors can INSERT only
+-- Public access: Anyone (anon + authenticated) can submit complaints & view public issue board
 DROP POLICY IF EXISTS "anon_insert_maintenance" ON maintenance_requests;
-CREATE POLICY "anon_insert_maintenance"
-  ON maintenance_requests FOR INSERT
-  TO anon
-  WITH CHECK (true);
-
--- Authenticated users can also insert maintenance requests
 DROP POLICY IF EXISTS "auth_insert_maintenance" ON maintenance_requests;
-CREATE POLICY "auth_insert_maintenance"
-  ON maintenance_requests FOR INSERT
-  TO authenticated
-  WITH CHECK (true);
-
--- Authenticated users (all roles) can read maintenance requests
+DROP POLICY IF EXISTS "anon_read_maintenance" ON maintenance_requests;
 DROP POLICY IF EXISTS "auth_read_maintenance" ON maintenance_requests;
-CREATE POLICY "auth_read_maintenance"
-  ON maintenance_requests FOR SELECT
-  TO authenticated
-  USING (true);
+DROP POLICY IF EXISTS "public_insert_maintenance" ON maintenance_requests;
+DROP POLICY IF EXISTS "public_read_maintenance" ON maintenance_requests;
 
--- OFFICER can update status and assigned_to only (not delete)
+CREATE POLICY "public_insert_maintenance" ON maintenance_requests FOR INSERT TO anon, authenticated WITH CHECK (true);
+CREATE POLICY "public_read_maintenance"   ON maintenance_requests FOR SELECT TO anon, authenticated USING (true);
+
+-- OFFICER, ADMIN, SUPER_ADMIN can update request status & resolution notes
 DROP POLICY IF EXISTS "officer_update_maintenance" ON maintenance_requests;
 CREATE POLICY "officer_update_maintenance"
   ON maintenance_requests FOR UPDATE
@@ -195,24 +141,15 @@ CREATE POLICY "admin_delete_maintenance"
   TO authenticated
   USING (current_user_role() IN ('ADMIN', 'SUPER_ADMIN'));
 
--- Anonymous visitors can read maintenance requests (for public issue board & ticket tracking)
-DROP POLICY IF EXISTS "anon_read_maintenance" ON maintenance_requests;
-DROP POLICY IF EXISTS "anon_read_maintenance_by_code" ON maintenance_requests;
-CREATE POLICY "anon_read_maintenance"
-  ON maintenance_requests FOR SELECT
-  TO anon
-  USING (true);
-
 -- ---------------------------------------------------------------------------
 -- 6. PROFILES POLICIES
 -- ---------------------------------------------------------------------------
 
--- Authenticated users (all staff roles) can read profiles
-DROP POLICY IF EXISTS "auth_read_own_profile" ON profiles;
-DROP POLICY IF EXISTS "auth_read_profiles" ON profiles;
-CREATE POLICY "auth_read_profiles"
+-- Public read access for staff full_name (for issue board officer badges)
+DROP POLICY IF EXISTS "public_read_profiles" ON profiles;
+CREATE POLICY "public_read_profiles"
   ON profiles FOR SELECT
-  TO authenticated
+  TO anon, authenticated
   USING (true);
 
 -- Only SUPER_ADMIN can insert new profiles (create employees)
@@ -237,13 +174,6 @@ CREATE POLICY "super_admin_delete_profiles"
   ON profiles FOR DELETE
   TO authenticated
   USING (current_user_role() = 'SUPER_ADMIN');
-
--- Anonymous visitors can read officer names for public issue board / ticket tracking
-DROP POLICY IF EXISTS "anon_read_profiles" ON profiles;
-CREATE POLICY "anon_read_profiles"
-  ON profiles FOR SELECT
-  TO anon
-  USING (true);
 
 -- ---------------------------------------------------------------------------
 -- 7. STORAGE BUCKET & POLICIES

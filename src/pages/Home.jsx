@@ -6,7 +6,7 @@ import Card, { StatCard } from '../components/Card';
 import { PARK_IMAGES } from '../utils/constants';
 import { getVisitCount } from '../services/visitService';
 import { getAverageRatings } from '../services/feedbackService';
-import { getComplaints } from '../services/maintenanceService';
+import { getPublicIssues } from '../services/maintenanceService';
 import { getAllParks } from '../services/parkService';
 import { getParkOperationalStatus } from '../utils/helpers';
 
@@ -29,7 +29,7 @@ export default function Home() {
         const [visitRes, ratingRes, complaintsRes, parksRes] = await Promise.all([
           getVisitCount(null, 'today'),
           getAverageRatings(null),
-          getComplaints({ limit: 500 }),
+          getPublicIssues(),
           getAllParks(),
         ]);
 

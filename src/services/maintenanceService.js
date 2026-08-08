@@ -196,6 +196,7 @@ export async function getComplaints(filters = {}) {
   const to = from + limit - 1;
   const db = publicClient();
 
+  // Try 1: Full query joining parks and profiles
   let query = db
     .from('maintenance_requests')
     .select('*, parks(name), profiles(full_name)', { count: 'exact' })
@@ -209,12 +210,12 @@ export async function getComplaints(filters = {}) {
 
   const { data, error, count } = await query;
 
-  if (!error) {
-    if (data && data.length > 0) syncServerTicketsMirror(data);
-    return { data: data || [], error: null, count: count || 0 };
+  if (!error && data) {
+    if (data.length > 0) syncServerTicketsMirror(data);
+    return { data, error: null, count: count || 0 };
   }
 
-  // Fallback if profiles join fails due to RLS
+  // Try 2: Alt query joining parks only (stripping profiles join in case profiles RLS blocks anon)
   let altQuery = db
     .from('maintenance_requests')
     .select('*, parks(name)', { count: 'exact' })
@@ -231,7 +232,24 @@ export async function getComplaints(filters = {}) {
     return { data: altRes.data, error: null, count: altRes.count || 0 };
   }
 
-  // Return local mirror if DB fetch completely fails
+  // Try 3: Simple query on maintenance_requests table alone
+  let simpleQuery = db
+    .from('maintenance_requests')
+    .select('*', { count: 'exact' })
+    .order(sortBy, { ascending });
+  if (status) simpleQuery = simpleQuery.eq('status', status);
+  if (priority) simpleQuery = simpleQuery.eq('priority', priority);
+  if (issueType) simpleQuery = simpleQuery.eq('issue_type', issueType);
+  if (parkId) simpleQuery = simpleQuery.eq('park_id', parkId);
+  simpleQuery = simpleQuery.range(from, to);
+
+  const simpleRes = await simpleQuery;
+  if (!simpleRes.error && simpleRes.data) {
+    if (simpleRes.data.length > 0) syncServerTicketsMirror(simpleRes.data);
+    return { data: simpleRes.data, error: null, count: simpleRes.count || 0 };
+  }
+
+  // Final Fallback: Return local mirror data (never throw or return empty error to UI)
   const mirrored = getServerTicketsMirror();
   return { data: mirrored, error: null, count: mirrored.length };
 }

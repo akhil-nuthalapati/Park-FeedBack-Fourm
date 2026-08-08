@@ -1,4 +1,4 @@
-import { createContext, useState, useEffect } from 'react';
+import { createContext, useState, useEffect, useRef } from 'react';
 import { supabase } from '../services/supabase';
 import { getUserProfile } from '../services/authService';
 
@@ -9,46 +9,52 @@ export function AuthProvider({ children }) {
   const [profile, setProfile] = useState(null);
   const [role, setRole] = useState(null);
   const [loading, setLoading] = useState(true);
+  const isInitialLoadDone = useRef(false);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) {
-        setUser(session.user);
-        loadProfile(session.user);
-      } else {
-        setLoading(false);
-      }
-    });
-
-    const { data: listener } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      if (session?.user) {
-        setUser(session.user);
-        loadProfile(session.user);
+    // Single handler for authentication state
+    const handleAuthChange = async (authUser) => {
+      if (authUser) {
+        setUser(authUser);
+        try {
+          const { data, error } = await getUserProfile();
+          if (!error && data) {
+            setProfile(data);
+            setRole(data.role);
+          } else {
+            setProfile(null);
+            setRole(null);
+          }
+        } catch (e) {
+          console.error('Error loading profile:', e);
+        }
       } else {
         setUser(null);
         setProfile(null);
         setRole(null);
-        setLoading(false);
+      }
+      setLoading(false);
+    };
+
+    // Get initial session
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (!isInitialLoadDone.current) {
+        isInitialLoadDone.current = true;
+        handleAuthChange(session?.user || null);
       }
     });
 
-    return () => listener.subscription.unsubscribe();
-  }, []);
-
-  async function loadProfile(authUser) {
-    setLoading(true);
-    try {
-      const { data, error } = await getUserProfile();
-      if (!error && data) {
-        setProfile(data);
-        setRole(data.role);
+    // Listen for auth state changes
+    const { data: listener } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      if (isInitialLoadDone.current) {
+        handleAuthChange(session?.user || null);
       }
-    } catch (e) {
-      console.error('Error loading profile:', e);
-    } finally {
-      setLoading(false);
-    }
-  }
+    });
+
+    return () => {
+      listener?.subscription?.unsubscribe();
+    };
+  }, []);
 
   const value = {
     user,

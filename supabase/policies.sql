@@ -79,7 +79,15 @@ CREATE POLICY "super_admin_delete_parks"
 -- 3. VISITS POLICIES
 -- ---------------------------------------------------------------------------
 
--- Anonymous visitors can INSERT only (check-in)
+-- BUG FIX: Anonymous visitors MUST be able to SELECT visits so public Home
+-- page stats ("Today's Visitors") are visible without login.
+DROP POLICY IF EXISTS "anon_read_visits" ON visits;
+CREATE POLICY "anon_read_visits"
+  ON visits FOR SELECT
+  TO anon
+  USING (true);
+
+-- Anonymous visitors can INSERT (check-in)
 DROP POLICY IF EXISTS "anon_insert_visits" ON visits;
 CREATE POLICY "anon_insert_visits"
   ON visits FOR INSERT
@@ -107,11 +115,17 @@ CREATE POLICY "super_admin_delete_visits"
   TO authenticated
   USING (current_user_role() = 'SUPER_ADMIN');
 
--- NOTE: No SELECT policy for anon on visits (anonymous cannot read visits)
-
 -- ---------------------------------------------------------------------------
 -- 4. FEEDBACK POLICIES
 -- ---------------------------------------------------------------------------
+
+-- BUG FIX: Anonymous visitors MUST be able to SELECT feedback so the public
+-- Home page "Average Rating" stat is visible without login.
+DROP POLICY IF EXISTS "anon_read_feedback" ON feedback;
+CREATE POLICY "anon_read_feedback"
+  ON feedback FOR SELECT
+  TO anon
+  USING (true);
 
 -- Anonymous visitors can INSERT only
 DROP POLICY IF EXISTS "anon_insert_feedback" ON feedback;
@@ -140,8 +154,6 @@ CREATE POLICY "super_admin_delete_feedback"
   ON feedback FOR DELETE
   TO authenticated
   USING (current_user_role() = 'SUPER_ADMIN');
-
--- NOTE: No SELECT policy for anon on feedback
 
 -- ---------------------------------------------------------------------------
 -- 5. MAINTENANCE REQUESTS POLICIES
@@ -185,6 +197,7 @@ CREATE POLICY "admin_delete_maintenance"
 
 -- Anonymous visitors can read maintenance requests (for public issue board & ticket tracking)
 DROP POLICY IF EXISTS "anon_read_maintenance" ON maintenance_requests;
+DROP POLICY IF EXISTS "anon_read_maintenance_by_code" ON maintenance_requests;
 CREATE POLICY "anon_read_maintenance"
   ON maintenance_requests FOR SELECT
   TO anon
@@ -287,4 +300,3 @@ CREATE POLICY "admin_delete_maintenance_images"
     bucket_id = 'maintenance-images'
     AND current_user_role() IN ('ADMIN', 'SUPER_ADMIN')
   );
-

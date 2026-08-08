@@ -14,31 +14,19 @@ export function generateTicketCode() {
   return `MR-${code}`;
 }
 
-// Map detailed issue titles to valid Postgres issue_type ENUM values ('equipment'|'lighting'|'hygiene'|'safety'|'greenery'|'other')
+// Map detailed issue titles to valid Postgres issue_type ENUM values
 export function mapToValidIssueTypeEnum(selectedIssue) {
   if (!selectedIssue) return 'other';
   const str = String(selectedIssue).toLowerCase();
 
   const validEnums = ['equipment', 'lighting', 'hygiene', 'safety', 'greenery', 'other'];
-  if (validEnums.includes(str)) {
-    return str;
-  }
+  if (validEnums.includes(str)) return str;
 
-  if (str.includes('light') || str.includes('lamp') || str.includes('electric') || str.includes('pole') || str.includes('dark')) {
-    return 'lighting';
-  }
-  if (str.includes('bench') || str.includes('swing') || str.includes('slide') || str.includes('equipment') || str.includes('gate') || str.includes('fence') || str.includes('play') || str.includes('fountain') || str.includes('pipe')) {
-    return 'equipment';
-  }
-  if (str.includes('clean') || str.includes('garbage') || str.includes('trash') || str.includes('washroom') || str.includes('toilet') || str.includes('leak') || str.includes('smell') || str.includes('hygiene') || str.includes('waste') || str.includes('dustbin')) {
-    return 'hygiene';
-  }
-  if (str.includes('tree') || str.includes('grass') || str.includes('plant') || str.includes('green') || str.includes('branch') || str.includes('lawn') || str.includes('flower')) {
-    return 'greenery';
-  }
-  if (str.includes('safe') || str.includes('security') || str.includes('guard') || str.includes('cctv') || str.includes('hazard') || str.includes('snake') || str.includes('broken glass')) {
-    return 'safety';
-  }
+  if (str.includes('light') || str.includes('lamp') || str.includes('electric') || str.includes('pole') || str.includes('dark')) return 'lighting';
+  if (str.includes('bench') || str.includes('swing') || str.includes('slide') || str.includes('equipment') || str.includes('gate') || str.includes('fence') || str.includes('play') || str.includes('fountain') || str.includes('pipe')) return 'equipment';
+  if (str.includes('clean') || str.includes('garbage') || str.includes('trash') || str.includes('washroom') || str.includes('toilet') || str.includes('leak') || str.includes('smell') || str.includes('hygiene') || str.includes('waste') || str.includes('dustbin')) return 'hygiene';
+  if (str.includes('tree') || str.includes('grass') || str.includes('plant') || str.includes('green') || str.includes('branch') || str.includes('lawn') || str.includes('flower')) return 'greenery';
+  if (str.includes('safe') || str.includes('security') || str.includes('guard') || str.includes('cctv') || str.includes('hazard') || str.includes('snake') || str.includes('broken glass')) return 'safety';
 
   return 'other';
 }
@@ -63,7 +51,7 @@ export async function submitComplaint(payload) {
     if (recentReports && recentReports.length >= 2) {
       isRecurring = true;
       recentCount = recentReports.length + 1;
-      priority = 'high'; // Auto-escalate priority to high
+      priority = 'high';
     }
   } catch (e) {
     console.warn('Error checking recurring complaints:', e);
@@ -84,21 +72,21 @@ export async function submitComplaint(payload) {
     ticket_code: ticketCode,
   };
 
-  let parkName = 'Park';
-  if (payload.park_name) {
-    parkName = payload.park_name;
-  }
+  let parkName = payload.park_name || 'Park';
 
-  // 2. Insert into maintenance_requests on server
+  // 2. BUG FIX: Add .select().single() so we get the inserted record back
   let { data, error } = await supabase
     .from('maintenance_requests')
-    .insert([finalPayload]);
+    .insert([finalPayload])
+    .select()
+    .single();
 
-  // Fallback if ticket_code column isn't in DB schema yet
-  if (error && (error.message?.includes('ticket_code') || error.code === '42703')) {
+  // Fallback if ticket_code or visitor_phone column not in DB schema yet
+  if (error && (error.message?.includes('ticket_code') || error.message?.includes('visitor_phone') || error.code === '42703')) {
     delete finalPayload.ticket_code;
     delete finalPayload.visitor_phone;
-    const retryRes = await supabase.from('maintenance_requests').insert([finalPayload]);
+    const retryRes = await supabase.from('maintenance_requests').insert([finalPayload]).select().single();
+    data = retryRes.data;
     error = retryRes.error;
   }
 
@@ -106,13 +94,15 @@ export async function submitComplaint(payload) {
   if (error && (error.code === '22P02' || error.status === 400)) {
     console.warn('Enum mismatch detected, retrying with fallback issue_type "other":', error);
     finalPayload.issue_type = 'other';
-    const retryRes = await supabase.from('maintenance_requests').insert([finalPayload]);
+    const retryRes = await supabase.from('maintenance_requests').insert([finalPayload]).select().single();
+    data = retryRes.data;
     error = retryRes.error;
   }
 
+  // Build a local mirror record for immediate UI feedback
   const submittedRecord = {
-    id: `srv-${Date.now()}`,
-    ticket_code: ticketCode,
+    id: data?.id || `srv-${Date.now()}`,
+    ticket_code: data?.ticket_code || ticketCode,
     park_id: payload.park_id,
     issue_type: enumType,
     description: fullDescription,
@@ -120,18 +110,18 @@ export async function submitComplaint(payload) {
     status: 'open',
     photo_url: payload.photo_url || null,
     visitor_phone: payload.visitor_phone || null,
-    created_at: new Date().toISOString(),
-    parks: { name: parkName }
+    created_at: data?.created_at || new Date().toISOString(),
+    parks: { name: parkName },
   };
   syncServerTicketsMirror(submittedRecord);
 
   // 3. TRIGGER NOTIFICATIONS TO ALL PROFILES
+  // BUG FIX: Pass data?.id (UUID) as referenceId, not ticketCode string
   if (!error) {
-    if (data) syncServerTicketsMirror(data);
-    const notifTitle = isRecurring 
+    const notifTitle = isRecurring
       ? `⚡ RECURRING ALERT: ${enumType.toUpperCase()} at ${parkName}`
       : `🚨 New Maintenance Issue: ${enumType.toUpperCase()} at ${parkName}`;
-    
+
     const notifMsg = isRecurring
       ? `⚠️ 3+ reports detected within 48h! Priority auto-escalated to HIGH. Ticket Code: ${ticketCode}`
       : `New report submitted (${priority} priority). Ticket Code: ${ticketCode}. Description: ${payload.description?.substring(0, 80) || ''}`;
@@ -140,7 +130,7 @@ export async function submitComplaint(payload) {
       title: notifTitle,
       message: notifMsg,
       type: isRecurring ? 'escalation' : 'maintenance',
-      referenceId: ticketCode,
+      referenceId: data?.id || null, // BUG FIX: must be UUID or null, not ticket code string
     });
   }
 
@@ -164,10 +154,9 @@ export async function uploadComplaintPhoto(file) {
       return { data: urlData.publicUrl, error: null };
     }
   } catch (e) {
-    console.warn('Supabase storage bucket upload error, converting to base64 fallback:', e);
+    console.warn('Supabase storage upload error, converting to base64 fallback:', e);
   }
 
-  // Fail-Safe Fallback: Convert image file to base64 Data URL so submission NEVER fails
   return readFileAsBase64(file);
 }
 
@@ -175,18 +164,17 @@ export function readFileAsBase64(file) {
   if (!file) return Promise.resolve({ data: null, error: null });
   return new Promise((resolve) => {
     const reader = new FileReader();
-    reader.onloadend = () => {
-      resolve({ data: reader.result, error: null });
-    };
-    reader.onerror = () => {
-      resolve({ data: null, error: 'Failed to read image file.' });
-    };
+    reader.onloadend = () => resolve({ data: reader.result, error: null });
+    reader.onerror = () => resolve({ data: null, error: 'Failed to read image file.' });
     reader.readAsDataURL(file);
   });
 }
 
 export async function getComplaints(filters = {}) {
-  const { page = 1, limit = 50, status, priority, issueType, parkId, sortBy = 'created_at', ascending = false } = filters;
+  const {
+    page = 1, limit = 50, status, priority, issueType, parkId,
+    sortBy = 'created_at', ascending = false,
+  } = filters;
   const from = (page - 1) * limit;
   const to = from + limit - 1;
 
@@ -202,12 +190,14 @@ export async function getComplaints(filters = {}) {
   query = query.range(from, to);
 
   const { data, error, count } = await query;
-  if (!error && data && data.length > 0) {
-    syncServerTicketsMirror(data);
-    return { data, error: null, count };
+
+  // BUG FIX: Only fall back to alt query on an actual error, NOT on empty results.
+  if (!error) {
+    if (data && data.length > 0) syncServerTicketsMirror(data);
+    return { data: data || [], error: null, count: count || 0 };
   }
 
-  // Fallback if profiles join fails due to RLS
+  // Fallback if profiles join fails due to RLS (strip profiles join)
   let altQuery = supabase
     .from('maintenance_requests')
     .select('*, parks(name)', { count: 'exact' })
@@ -219,9 +209,7 @@ export async function getComplaints(filters = {}) {
   altQuery = altQuery.range(from, to);
 
   const altRes = await altQuery;
-  if (altRes.data && altRes.data.length > 0) {
-    syncServerTicketsMirror(altRes.data);
-  }
+  if (altRes.data && altRes.data.length > 0) syncServerTicketsMirror(altRes.data);
   return { data: altRes.data || [], error: altRes.error, count: altRes.count || 0 };
 }
 
@@ -243,7 +231,7 @@ export async function assignComplaint(id, employeeId) {
       title: `👤 Staff Assigned to Request`,
       message: `Maintenance Ticket ${data.ticket_code || id} assigned to officer.`,
       type: 'info',
-      referenceId: id,
+      referenceId: id, // This is already a UUID
     });
   }
 
@@ -252,18 +240,10 @@ export async function assignComplaint(id, employeeId) {
 
 export async function updateStatus(id, status, resolutionNote = null, resolvedBy = null, resolutionImageUrl = null) {
   const updateFields = { status };
-  if (resolutionNote !== null) {
-    updateFields.resolution_note = resolutionNote;
-  }
-  if (resolvedBy) {
-    updateFields.resolved_by = resolvedBy;
-  }
-  if (resolutionImageUrl) {
-    updateFields.resolution_image_url = resolutionImageUrl;
-  }
-  if (status === 'resolved') {
-    updateFields.resolved_at = new Date().toISOString();
-  }
+  if (resolutionNote !== null) updateFields.resolution_note = resolutionNote;
+  if (resolvedBy) updateFields.resolved_by = resolvedBy;
+  if (resolutionImageUrl) updateFields.resolution_image_url = resolutionImageUrl;
+  if (status === 'resolved') updateFields.resolved_at = new Date().toISOString();
 
   syncServerTicketsMirror({
     id,
@@ -280,7 +260,7 @@ export async function updateStatus(id, status, resolutionNote = null, resolvedBy
     .select()
     .single();
 
-  // Fallback if resolution_note/resolution_image_url column not present in DB schema
+  // Fallback if resolution columns not present in DB schema yet
   if (error && (error.message?.includes('resolution_note') || error.message?.includes('resolution_image_url') || error.code === '42703')) {
     delete updateFields.resolution_note;
     delete updateFields.resolved_by;
@@ -300,17 +280,21 @@ export async function updateStatus(id, status, resolutionNote = null, resolvedBy
     const isResolved = status === 'resolved';
     createNotificationsForAllProfiles({
       title: isResolved ? `✅ Maintenance Request Resolved` : `🔄 Request Status Updated: ${status.toUpperCase()}`,
-      message: isResolved 
+      message: isResolved
         ? `Ticket ${data?.ticket_code || id} has been marked RESOLVED. Note: ${resolutionNote || 'Issue fixed.'}`
         : `Ticket ${data?.ticket_code || id} status changed to ${status}.`,
       type: isResolved ? 'resolution' : 'info',
-      referenceId: id,
+      referenceId: id, // UUID — correct
     });
   }
 
   return { data, error };
 }
 
+// ---------------------------------------------------------------------------
+// LOCAL MIRROR — keeps a localStorage cache of the last 100 server tickets
+// for instant UI feedback and offline fallback
+// ---------------------------------------------------------------------------
 const SERVER_TICKETS_MIRROR_KEY = 'gvmc_public_server_tickets';
 
 function getServerTicketsMirror() {
@@ -329,14 +313,13 @@ function syncServerTicketsMirror(tickets) {
   try {
     const current = getServerTicketsMirror();
     const map = new Map();
-    // Pre-populate with existing mirror
-    current.forEach(item => {
+    current.forEach((item) => {
       const k = item.ticket_code || item.id;
       if (k) map.set(k, item);
     });
 
     const list = Array.isArray(tickets) ? tickets : [tickets];
-    list.forEach(item => {
+    list.forEach((item) => {
       const k = item.ticket_code || item.id;
       if (k) {
         const existing = map.get(k) || {};
@@ -349,44 +332,36 @@ function syncServerTicketsMirror(tickets) {
   } catch (e) {}
 }
 
-/**
- * Fetch public issues from the server — uses supabaseAdmin (service role) to bypass RLS
- * This is the ONLY reliable way because RLS on maintenance_requests blocks SELECT for anon role
- */
+// ---------------------------------------------------------------------------
+// PUBLIC ISSUE FETCHING — uses supabaseAdmin (service role) to bypass RLS
+// ---------------------------------------------------------------------------
 export async function getPublicIssues() {
   const db = publicClient();
   try {
-    // Primary: service role client bypasses RLS completely
     const { data, error } = await db
       .from('maintenance_requests')
       .select('*, parks(name)')
       .order('created_at', { ascending: false })
       .limit(50);
 
-    if (!error && data && data.length > 0) {
-      syncServerTicketsMirror(data);
-      return { data, error: null };
+    if (!error) {
+      if (data && data.length > 0) syncServerTicketsMirror(data);
+      return { data: data || [], error: null };
     }
 
-    // If service role query returned empty but no error, table might genuinely be empty
-    if (!error && data && data.length === 0) {
-      // Still check mirror in case data was synced from admin operations
-      const mirrored = getServerTicketsMirror();
-      return { data: mirrored, error: null };
-    }
-
-    // If error occurred (e.g. network), try simpler query
+    // If primary fails (network), try simpler query without join
     const fallback = await db
       .from('maintenance_requests')
       .select('*')
       .order('created_at', { ascending: false })
       .limit(50);
 
-    if (!fallback.error && fallback.data && fallback.data.length > 0) {
-      syncServerTicketsMirror(fallback.data);
-      return { data: fallback.data, error: null };
+    if (!fallback.error) {
+      if (fallback.data && fallback.data.length > 0) syncServerTicketsMirror(fallback.data);
+      return { data: fallback.data || [], error: null };
     }
 
+    // Last resort: return local mirror
     const mirrored = getServerTicketsMirror();
     return { data: mirrored, error: error || fallback.error };
   } catch (e) {
@@ -396,9 +371,9 @@ export async function getPublicIssues() {
   }
 }
 
-/**
- * Search complaint by ticket code, phone number, or ID — uses supabaseAdmin to bypass RLS
- */
+// ---------------------------------------------------------------------------
+// TICKET LOOKUP — BUG FIX: properly propagate errors from each lookup step
+// ---------------------------------------------------------------------------
 export async function getComplaintByTicketOrPhone(lookupTerm) {
   if (!lookupTerm) return { data: [], error: null };
   const db = publicClient();
@@ -407,24 +382,26 @@ export async function getComplaintByTicketOrPhone(lookupTerm) {
 
   try {
     // 1. Ticket code exact match
-    const { data: ticketData } = await db
+    const { data: ticketData, error: ticketErr } = await db
       .from('maintenance_requests')
       .select('*, parks(name)')
       .eq('ticket_code', upperTerm)
       .order('created_at', { ascending: false });
 
+    if (ticketErr) console.warn('Ticket code lookup error:', ticketErr);
     if (ticketData && ticketData.length > 0) {
       syncServerTicketsMirror(ticketData);
       return { data: ticketData, error: null };
     }
 
     // 2. Phone number match
-    const { data: phoneData } = await db
+    const { data: phoneData, error: phoneErr } = await db
       .from('maintenance_requests')
       .select('*, parks(name)')
       .eq('visitor_phone', cleanTerm)
       .order('created_at', { ascending: false });
 
+    if (phoneErr) console.warn('Phone lookup error:', phoneErr);
     if (phoneData && phoneData.length > 0) {
       syncServerTicketsMirror(phoneData);
       return { data: phoneData, error: null };
@@ -433,10 +410,11 @@ export async function getComplaintByTicketOrPhone(lookupTerm) {
     // 3. UUID ID match
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     if (uuidRegex.test(cleanTerm)) {
-      const { data: uuidData } = await db
+      const { data: uuidData, error: uuidErr } = await db
         .from('maintenance_requests')
         .select('*, parks(name)')
         .eq('id', cleanTerm);
+      if (uuidErr) console.warn('UUID lookup error:', uuidErr);
       if (uuidData && uuidData.length > 0) {
         syncServerTicketsMirror(uuidData);
         return { data: uuidData, error: null };
@@ -444,23 +422,25 @@ export async function getComplaintByTicketOrPhone(lookupTerm) {
     }
 
     // 4. Fuzzy ticket_code match
-    const { data: fuzzyData } = await db
+    const { data: fuzzyData, error: fuzzyErr } = await db
       .from('maintenance_requests')
       .select('*, parks(name)')
       .ilike('ticket_code', `%${cleanTerm}%`)
       .order('created_at', { ascending: false });
 
+    if (fuzzyErr) console.warn('Fuzzy ticket lookup error:', fuzzyErr);
     if (fuzzyData && fuzzyData.length > 0) {
       syncServerTicketsMirror(fuzzyData);
       return { data: fuzzyData, error: null };
     }
 
-    // 5. Check mirror fallback
+    // 5. Local mirror fallback
     const mirrored = getServerTicketsMirror();
-    const match = mirrored.filter(t => 
-      t.ticket_code?.toUpperCase() === upperTerm || 
-      t.visitor_phone === cleanTerm ||
-      t.id === cleanTerm
+    const match = mirrored.filter(
+      (t) =>
+        t.ticket_code?.toUpperCase() === upperTerm ||
+        t.visitor_phone === cleanTerm ||
+        t.id === cleanTerm
     );
     if (match.length > 0) return { data: match, error: null };
 

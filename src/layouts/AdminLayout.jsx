@@ -2,6 +2,7 @@ import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { logout } from '../services/authService';
 import { getNotifications, markNotificationAsRead, markAllNotificationsAsRead } from '../services/notificationService';
+import PageTransition from '../components/PageTransition';
 import {
   LayoutDashboard,
   Users,
@@ -290,7 +291,9 @@ export default function AdminLayout() {
 
         {/* Page content */}
         <main className="flex-1 p-4 lg:p-8">
-          <Outlet />
+          <PageTransition>
+            <Outlet />
+          </PageTransition>
         </main>
       </div>
     </div>

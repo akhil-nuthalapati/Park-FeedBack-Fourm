@@ -1,6 +1,7 @@
 import { Outlet } from 'react-router-dom';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
+import PageTransition from '../components/PageTransition';
 import { useState, useEffect } from 'react';
 import { getBroadcastAnnouncement } from '../services/announcementService';
 import { AlertTriangle, Bell, X } from 'lucide-react';
@@ -79,7 +80,9 @@ export default function VisitorLayout() {
       )}
       <Navbar />
       <main className="flex-1">
-        <Outlet />
+        <PageTransition>
+          <Outlet />
+        </PageTransition>
       </main>
       <Footer />
     </div>

@@ -2,10 +2,11 @@ import { supabase } from './supabase';
 
 export async function getAllParks() {
   const { data, error } = await supabase.from('parks').select('*').order('name');
-  return { data, error };
+  return { data: data || [], error };
 }
 
 export async function getParkById(id) {
+  if (!id) return { data: null, error: 'Park ID is required' };
   const { data, error } = await supabase.from('parks').select('*').eq('id', id).single();
   return { data, error };
 }
@@ -13,11 +14,11 @@ export async function getParkById(id) {
 export async function getParkByQrCode(code) {
   if (!code) return { data: null, error: 'Invalid QR Code' };
   const cleanCode = String(code).trim().toUpperCase();
-  
-  // Try ilike (case-insensitive) lookup first
+
+  // Try case-insensitive lookup first
   let { data, error } = await supabase.from('parks').select('*').ilike('qr_code', cleanCode).single();
   if (error || !data) {
-    // Fallback: try raw exact match
+    // Fallback: exact match
     const res = await supabase.from('parks').select('*').eq('qr_code', String(code).trim()).single();
     data = res.data;
     error = res.error;
@@ -28,7 +29,6 @@ export async function getParkByQrCode(code) {
 export async function createPark(payload) {
   let qrCode = payload.qr_code;
   if (!qrCode || !qrCode.trim()) {
-    // Auto-generate QR slug from name or random unique suffix
     const slug = (payload.name || 'PARK')
       .toUpperCase()
       .replace(/[^A-Z0-9]/g, '-')
@@ -37,24 +37,27 @@ export async function createPark(payload) {
     const randomSuffix = Math.floor(1000 + Math.random() * 9000);
     qrCode = `PARK-${slug}-${randomSuffix}`;
   } else {
-    // Sanitize user-provided QR code (convert spaces to hyphens, uppercase)
     qrCode = qrCode.trim().toUpperCase().replace(/\s+/g, '-');
   }
 
-  const finalPayload = {
-    ...payload,
-    qr_code: qrCode,
-  };
-
+  const finalPayload = { ...payload, qr_code: qrCode };
   const { data, error } = await supabase.from('parks').insert([finalPayload]).select().single();
   return { data, error };
 }
 
 export async function updatePark(id, payload) {
+  if (!id) return { data: null, error: 'Park ID is required' };
   const finalPayload = { ...payload };
   if (finalPayload.qr_code) {
     finalPayload.qr_code = finalPayload.qr_code.trim().toUpperCase().replace(/\s+/g, '-');
   }
   const { data, error } = await supabase.from('parks').update(finalPayload).eq('id', id).select().single();
   return { data, error };
+}
+
+/** Delete a park — only SUPER_ADMIN can do this (enforced by RLS policy) */
+export async function deletePark(id) {
+  if (!id) return { error: 'Park ID is required' };
+  const { error } = await supabase.from('parks').delete().eq('id', id);
+  return { error };
 }

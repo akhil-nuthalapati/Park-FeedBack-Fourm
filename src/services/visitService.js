@@ -1,14 +1,18 @@
-import { supabase } from './supabase';
+import { supabase, supabaseAdmin } from './supabase';
+
+const publicClient = () => supabaseAdmin || supabase;
 
 export async function logVisit(parkId, deviceId = null) {
-  const { data, error } = await supabase
+  const db = publicClient();
+  const { data, error } = await db
     .from('visits')
     .insert([{ park_id: parkId, device_id: deviceId }]);
   return { data, error };
 }
 
 export async function getVisitCount(parkId = null, range = 'today') {
-  let query = supabase.from('visits').select('id', { count: 'exact', head: true });
+  const db = publicClient();
+  let query = db.from('visits').select('id', { count: 'exact', head: true });
   if (parkId) query = query.eq('park_id', parkId);
 
   const now = new Date();
@@ -26,12 +30,13 @@ export async function getVisitCount(parkId = null, range = 'today') {
       break;
   }
   const { count, error } = await query;
-  return { data: count, error };
+  return { data: count || 0, error };
 }
 
 export async function getDailyVisitors(parkId = null, days = 30) {
   const startDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
-  let query = supabase
+  const db = publicClient();
+  let query = db
     .from('visits')
     .select('visit_time')
     .gte('visit_time', startDate)
@@ -42,7 +47,7 @@ export async function getDailyVisitors(parkId = null, days = 30) {
   if (error) return { data: null, error };
 
   const grouped = {};
-  data.forEach((visit) => {
+  (data || []).forEach((visit) => {
     const date = new Date(visit.visit_time).toISOString().split('T')[0];
     grouped[date] = (grouped[date] || 0) + 1;
   });
@@ -52,7 +57,8 @@ export async function getDailyVisitors(parkId = null, days = 30) {
 }
 
 export async function getAllParkVisitCounts() {
-  const { data, error } = await supabase.from('visits').select('park_id');
+  const db = publicClient();
+  const { data, error } = await db.from('visits').select('park_id');
   if (error || !data) return { data: {}, error };
 
   const countsMap = {};

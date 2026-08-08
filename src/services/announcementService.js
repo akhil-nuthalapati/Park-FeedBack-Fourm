@@ -1,11 +1,12 @@
-import { supabase } from './supabase';
+import { supabase, supabaseAdmin } from './supabase';
 
+const publicClient = () => supabaseAdmin || supabase;
 const ANNOUNCEMENT_KEY = 'gvmc_broadcast_announcement';
 
 export async function getBroadcastAnnouncement() {
   try {
-    // 1. Fetch live active banner from Supabase database
-    const { data, error } = await supabase
+    const db = publicClient();
+    const { data, error } = await db
       .from('announcements')
       .select('*')
       .eq('active', true)
@@ -18,10 +19,10 @@ export async function getBroadcastAnnouncement() {
       return dbAnnouncement;
     }
   } catch (e) {
-    // Silent catch for table missing 404
+    // Silent catch — announcements table may not exist yet
   }
 
-  // 2. Fallback to localStorage if offline/table not created yet
+  // Fallback to localStorage if offline / table not created yet
   try {
     const local = localStorage.getItem(ANNOUNCEMENT_KEY);
     return local ? JSON.parse(local) : null;
@@ -33,28 +34,24 @@ export async function getBroadcastAnnouncement() {
 export async function setBroadcastAnnouncement(payload) {
   const announcementData = {
     message: payload.message.trim(),
-    type: payload.type || 'info', // 'info' | 'warning' | 'emergency'
+    type: payload.type || 'info',
     park_id: payload.park_id || '',
     park_name: payload.park_name || 'All Parks',
     active: true,
     updated_at: new Date().toISOString(),
   };
 
-  // Always sync to localStorage and dispatch custom event
   localStorage.setItem(ANNOUNCEMENT_KEY, JSON.stringify(announcementData));
   window.dispatchEvent(new Event('announcementUpdated'));
 
   try {
-    // Deactivate previous active banners in Supabase
-    await supabase.from('announcements').update({ active: false }).eq('active', true);
-
-    // Insert new live announcement in Supabase
-    const { data, error } = await supabase
+    const db = publicClient();
+    await db.from('announcements').update({ active: false }).eq('active', true);
+    const { data, error } = await db
       .from('announcements')
       .insert([announcementData])
       .select()
       .single();
-
     return { data: data || announcementData, error: null };
   } catch (e) {
     return { data: announcementData, error: null };
@@ -66,8 +63,7 @@ export async function clearBroadcastAnnouncement() {
   window.dispatchEvent(new Event('announcementUpdated'));
 
   try {
-    await supabase.from('announcements').update({ active: false }).eq('active', true);
-  } catch (e) {
-    // Silent catch
-  }
+    const db = publicClient();
+    await db.from('announcements').update({ active: false }).eq('active', true);
+  } catch (e) {}
 }

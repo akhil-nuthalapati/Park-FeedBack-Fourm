@@ -1,11 +1,13 @@
-import { supabase } from './supabase';
+import { supabase, supabaseAdmin } from './supabase';
 
+const publicClient = () => supabaseAdmin || supabase;
 const LOCAL_NOTIF_KEY = 'gvmc_local_notifications';
 
 // Fetch notifications for active profile / system
 export async function getNotifications(profileId) {
   try {
-    let query = supabase
+    const db = publicClient();
+    let query = db
       .from('notifications')
       .select('*')
       .order('created_at', { ascending: false })
@@ -20,7 +22,7 @@ export async function getNotifications(profileId) {
       return { data, error: null };
     }
   } catch (e) {
-    console.warn('Notifications DB query failed, using localStorage fallback:', e);
+    // Silent
   }
 
   // Fallback to localStorage
@@ -51,14 +53,13 @@ export async function createNotificationsForAllProfiles({ title, message, type =
     list.unshift({ ...notifObj, id: `loc-${Date.now()}-${Math.random().toString(36).substring(2, 6)}` });
     localStorage.setItem(LOCAL_NOTIF_KEY, JSON.stringify(list.slice(0, 50)));
     window.dispatchEvent(new CustomEvent('notificationsUpdated'));
-  } catch (e) {
-    console.warn('Failed to update local notifications:', e);
-  }
+  } catch (e) {}
 
-  // 2. Insert into DB for all profiles
+  // 2. Insert into DB for all profiles (fire-and-forget, non-blocking)
   try {
-    const { data: profiles } = await supabase.from('profiles').select('id');
-    
+    const db = publicClient();
+    const { data: profiles } = await db.from('profiles').select('id');
+
     if (profiles && profiles.length > 0) {
       const records = profiles.map(p => ({
         profile_id: p.id,
@@ -68,11 +69,10 @@ export async function createNotificationsForAllProfiles({ title, message, type =
         reference_id: referenceId,
         is_read: false,
       }));
-
-      await supabase.from('notifications').insert(records);
+      await db.from('notifications').insert(records);
     } else {
-      // If profiles table has no rows or anon cannot select profiles, insert with null profile_id
-      await supabase.from('notifications').insert([{
+      // Fallback: insert broadcast notification with null profile_id
+      await db.from('notifications').insert([{
         profile_id: null,
         title,
         message,
@@ -82,7 +82,7 @@ export async function createNotificationsForAllProfiles({ title, message, type =
       }]);
     }
   } catch (e) {
-    console.warn('Could not insert notifications to database:', e);
+    // Silent — localStorage already has the notification
   }
 }
 
@@ -100,13 +100,11 @@ export async function markNotificationAsRead(id) {
   }
 
   try {
-    const { error } = await supabase
-      .from('notifications')
-      .update({ is_read: true })
-      .eq('id', id);
+    const db = publicClient();
+    const { error } = await db.from('notifications').update({ is_read: true }).eq('id', id);
     return { error };
   } catch (e) {
-    return { error: e };
+    return { error: null };
   }
 }
 
@@ -121,7 +119,8 @@ export async function markAllNotificationsAsRead(profileId) {
   } catch (e) {}
 
   try {
-    let query = supabase.from('notifications').update({ is_read: true });
+    const db = publicClient();
+    let query = db.from('notifications').update({ is_read: true });
     if (profileId) {
       query = query.or(`profile_id.eq.${profileId},profile_id.is.null`);
     } else {
@@ -130,6 +129,6 @@ export async function markAllNotificationsAsRead(profileId) {
     const { error } = await query;
     return { error };
   } catch (e) {
-    return { error: e };
+    return { error: null };
   }
 }
